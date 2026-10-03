@@ -1,70 +1,89 @@
 # ETS2 Workshop
 
-Windows x64 的本地 ETS2 存档改装工具。技术栈为 Tauri 2、React / TypeScript、Rust。
+[简体中文](#简体中文) · [English](#english)
 
-## 使用
+## 简体中文
 
-从 GitHub Release 下载 Windows x64 ZIP，完整解压后运行 `ETS2 Workshop.exe`。不要只复制单个 EXE：同目录中的 `workshop-app.exe` 是主程序。
+一个用于《欧洲卡车模拟 2》的 Windows 存档改装工具。查看你拥有的卡车和配件，为它们更换发动机、变速箱、油箱等部件。
 
-首次启动会自动检测 Steam 多游戏库、文档和 OneDrive 中的路径。确认游戏安装目录与 ETS2 用户数据目录后，程序从 SCS 官方下载并校验解包器，再建立配件目录。存档解码器已编译进程序，不需要安装 Truck Tools、Rust、Node 或 Python。
+比如，给 Scania S 换上 Volvo 发动机，或用 DAF 的独立油箱增加容量。能否使用某个配件，取决于你的游戏内容和工具支持的改装范围。
 
-首次准备需要联网；下载并建立目录后，正常改装可以离线使用。若缺少 WebView2，启动器会先询问是否从微软下载并安装，完成后再打开向导。下载失败可以重试，不会改动游戏存档。
+### 开始使用
 
-1. 建立本机配件目录。首次解包本体与已识别的官方车型、轮胎、改装 DLC 需要数分钟；再次运行使用文件时间和大小标识的缓存。
-2. 打开存档；自动在独立子进程中解密。界面列出玩家拥有的所有卡车和其所有配件。查看操作不写入游戏文件。
-3. 选择配件，从其他车辆或配件目录选替换件，加入变更清单。性能参数来自游戏定义；不预测精确极速。
-4. 预览后另存为新存档，或备份并覆盖原档。保存时重新检查源文件哈希；如果游戏已更新源档，必须重新打开。
-5. 在游戏里手动加载。另存结果后，在改装记录页复查配件是否保留。恢复备份仅在目标仍是本工具写入的版本时允许。
+1. 从 [Releases](https://github.com/D3carabian/ets2-workshop/releases) 下载 Windows x64 发布包，完整解压，运行 `ETS2 Workshop.exe`。请保留解压出来的其他文件。
+2. 首次打开时，向导会自动寻找游戏和存档目录。确认路径，或手动修改。
+3. 等待程序下载必要的官方工具并读取配件。首次准备需要联网，可能需要几分钟；完成后，日常改装可以离线进行。
+4. 打开一个存档，选择卡车和要更换的配件，预览修改后保存。第一次尝试建议另存为新存档。
+5. 回到游戏，手动加载修改后的存档。之后可以在工具的改装记录中复查或恢复备份。
 
-## 改装范围
+不需要另外安装存档解密工具。如果电脑缺少 WebView2（用于显示应用界面的微软组件），启动器会提示安装。
 
-- 柴油发动机、变速箱、独立油箱和轮胎/轮毂位置之间的同类替换。核心部件保留配件 ID、退款和车辆状态，仅替换 `data_path`。
-- 外观件同车型、符合 `suitable_for` / `conflict_with` / `require` 时可替换。
-- 外观追加目前开放 beacon、r_grill、f_grill、sunshld。必须从已有自有车辆选择供体；供体与目标车型、驾驶室和底盘一致；目标安装类别未占用；不携带子挂件或关联对象。
-- 禁止追加发动机、变速箱、底盘、驾驶室、内饰、油箱等核心单例。底盘、驾驶室等复杂结构首版只读。
-- 未知定义只读。官方资源目录不能代表 Mod 的覆盖顺序；检测到 Mod 或未知扩展依赖的存档将拒绝打开。
-- 维修站的改装升级可能恢复原厂配件。实测普通维修及维修界面的部件更换可以保留此前测试的改装，但不代表所有组合均兼容。
-- 不修改游戏安装文件，不生成 Mod，不修改货币和等级；输出明文 SII，已在本机 1.61 存档试验中验证可加载。
+### 能改什么
 
-## 已有游戏内证据
+- 查看所有自有卡车，以及每辆车的配件。
+- 更换柴油发动机、变速箱、独立油箱，以及对应位置的轮胎和轮毂。
+- 更换部分外观件，也可以从其他自有卡车复制部分警示灯、格栅和遮阳板。添加时需要车型、驾驶室、底盘相同，且安装位置可用。
+- 保存前预览修改，另存为新存档，或自动备份后覆盖原档。
 
-Scania S 原独立 1000 L 油箱替换成 `/def/vehicle/truck/daf.2021/accessory/tank/4x2_1465.sii`：加载、驾驶、游戏再次保存后仍保留，用户报告续航 3112 → 4576。
+### 目前的限制
 
-Scania S 发动机替换为 `/def/vehicle/truck/volvo.fh_2024/engine/d17a780.sii`：用户确认可驾驶。追加第二底盘曾造成车轮模型初始化失败，因此程序硬性禁止此操作。
+目前支持原版和已识别的官方 DLC，**不支持 Mod**。含有 Mod 或无法识别的扩展依赖的存档会被拒绝打开。
 
-这类游戏内证据来自先前脚本试验。桌面程序使用相同字段操作，但新组合仍需游戏内验证。unit ID 会在游戏重存后变化，复查按车型、车牌定位；存在歧义时明确提示，不能假装匹配成功。
+发动机等核心部件只能替换，不能再加一个。底盘、驾驶室和复杂外观组合暂不支持改装；不认识的配件只能查看。工具不修改金钱、等级或游戏安装文件。
 
-## 开发
+维修站的改装升级可能把混搭配件换回原厂配置。此前测试中，普通维修和维修界面的部件更换保留了改装，但并非所有组合都经过验证。
 
-需要 Node.js 22、Rust MSVC、Visual Studio C++ Build Tools 和 WebView2。运行：
+已有 ETS2 1.61 的游戏内测试确认：Scania S 可以使用 DAF 的 1465 L 独立油箱和 Volvo 的 780 hp 发动机。更大马力不一定意味着更高极速，工具也不会预测精确极速。
 
-```powershell
-npm ci
-npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-npm run tauri dev
-```
+### 存档与备份
 
-发布构建：`pwsh -File scripts/build.ps1`，ZIP 输出到 `release/artifacts/`。仅本机编译需要以上依赖；成品不依赖 Python 或 Node。
+查看存档不会改动它。保存前，程序会检查游戏是否已经更新了这个存档，避免覆盖新的进度。备份可以恢复，但如果目标存档后来又被游戏修改，工具会阻止直接覆盖。
 
-源码：`src` 为界面，`src-tauri/src` 为解析、目录、改装、解密和保存核心。早期本机实验脚本、玩家存档和生成缓存均不进入公开源码或 Release。
+### 开发与致谢
 
-CLI：`workshop-cli inspect <game.sii> [catalog.json]` 只读检查；`workshop-cli index <游戏目录> <scs_extractor.exe> <缓存目录>` 建目录。
+界面使用 Tauri 和 React，存档处理使用 Rust。构建和发布方法见[开发文档](docs/RELEASING.md)，测试情况见[验证记录](docs/REVIEW.md)。
 
-`ETS2_WORKSHOP_DATA_DIR` 可以将设置、缓存、历史与备份隔离到指定目录，供自动化测试使用。默认使用 Windows 本地应用数据目录。
+存档解码基于 [DecryptTruck](https://github.com/CoffeSiberian/DecryptTruck)，读取游戏配件使用 [SCS 官方解包工具](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor)。相关许可见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目是非官方工具。
 
-## 依赖来源
+## English
 
-存档解码器基于 MIT 许可的 DecryptTruck 1.3.7，固定到 commit `4b6a167d7b35a5234bb3dde17ac1532740860791` 并随源码提供。局部修改与更新步骤见 `src-tauri/vendor/decrypt-truck/UPSTREAM.md`。正式包不再依赖或携带 SII_Decrypt.dll。
+A Windows save editor for Euro Truck Simulator 2. Browse your trucks and their parts, then swap engines, transmissions, fuel tanks, and more.
 
-官方解包器不随发布包再分发，向导直接从 SCS 官方获取，并同时校验压缩包和 EXE 的固定 SHA256。上游文件变化时明确停止，需维护者核实后更新应用中的清单。
+For example, you can fit a Volvo engine to a Scania S, or increase its fuel capacity with an independent DAF tank. Available parts depend on your installed game content and the modifications supported by the tool.
 
-第三方声明见 `THIRD_PARTY_NOTICES.md`；发布与 CI 说明见 `docs/RELEASING.md`。
+### Getting started
 
-- https://github.com/CoffeSiberian/DecryptTruck
-- https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor
-- https://modding.scssoft.com/wiki/Documentation/Engine/Units/accessory_data
+1. Download the Windows x64 package from [Releases](https://github.com/D3carabian/ets2-workshop/releases), extract the entire archive, and run `ETS2 Workshop.exe`. Keep the other extracted files alongside it.
+2. On first launch, the setup wizard looks for your game and save folders. Confirm the paths or adjust them manually.
+3. Wait while the app downloads the required official tool and reads the available parts. Initial setup needs an internet connection and may take a few minutes. After that, normal editing works offline.
+4. Open a save, choose a truck and replacement parts, then review and save your changes. Saving to a new slot is recommended for your first attempt.
+5. Return to the game and load the edited save manually. You can later check your changes or restore a backup from the app's history page.
 
-## 测试原则
+No separate save decryption tool is needed. If WebView2, Microsoft's component for displaying the app interface, is missing, the launcher will offer to install it.
 
-自动化仅使用合成存档或复制到工作区的存档。不得对玩家正在使用的存档运行写入测试。结构验证不等于游戏模型兼容性验证。
+### What you can do
+
+- Browse all owned trucks and every part fitted to them.
+- Replace diesel engines, transmissions, independent fuel tanks, and tires and rims in their corresponding positions.
+- Replace some appearance parts, or copy certain beacons, grilles, and sunshields from another owned truck. Adding parts requires the same truck model, cabin, and chassis, with an available mounting position.
+- Preview changes, save to a new slot, or overwrite a save after an automatic backup.
+
+### Current limits
+
+The app supports the base game and recognized official DLC. **Mods are not supported.** Saves that depend on Mods or unrecognized extensions will be refused.
+
+Core parts such as engines can only be replaced; you cannot add a second one. Chassis, cabins, and complex appearance combinations cannot currently be edited. Unrecognized parts are view-only. The app does not change money, levels, or game installation files.
+
+Customizing your truck at a service station may reset mixed-brand parts to factory options. In earlier tests, normal repairs and parts replacement through the repair menu preserved the modifications, but not every combination has been tested.
+
+In-game tests with ETS2 1.61 confirmed that a Scania S could use an independent DAF 1,465 L tank and a Volvo 780 hp engine. More horsepower does not always mean a higher top speed, and the app does not predict exact top speeds.
+
+### Saves and backups
+
+Browsing a save does not change it. Before writing, the app checks whether the game has updated the save, to avoid overwriting newer progress. Backups can be restored, but the app blocks a direct restore if the game has since changed the destination save.
+
+### Development and credits
+
+The interface uses Tauri and React, with Rust handling saves. See the [build and release guide](docs/RELEASING.md) and [validation notes](docs/REVIEW.md), currently in Chinese.
+
+Save decoding is based on [DecryptTruck](https://github.com/CoffeSiberian/DecryptTruck). Game parts are read using the [official SCS archive extractor](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor). See [third-party notices](THIRD_PARTY_NOTICES.md) for licenses. This is an unofficial project.
