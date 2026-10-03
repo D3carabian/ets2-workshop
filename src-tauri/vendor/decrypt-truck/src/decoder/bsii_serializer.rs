@@ -1,0 +1,347 @@
+use crate::strucs::data_sii::{BSIIData, BsiiDataSegment, BsiiStructureDecodedBlock};
+use crate::strucs::sii_types::DataTypeIdFormat;
+use rayon::prelude::*;
+
+static IDENT: &str = " ";
+const LIMITED_ALPHABET: [char; 63] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
+    'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B',
+    'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
+    'V', 'W', 'X', 'Y', 'Z', '_',
+];
+
+fn segment_serialize(block: &BsiiStructureDecodedBlock, header_version: u32) -> String {
+    let mut str_build = String::new();
+
+    for segment in &block.segments {
+        if segment.segment_type != 0 {
+            let data_type = segment.segment_type as i32;
+
+            match data_type {
+                x if x == DataTypeIdFormat::ArrayOfByteBool as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfEncodedString as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfIdA as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfIdC as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfIdE as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfInt32 as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfSingle as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfUInt16 as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfUInt32 as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfUInt64 as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfUTF8String as i32 => {
+                    str_build.push_str(&serialize_utf8_string_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfVectorOf3Int32 as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfVectorOf3Single as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfVectorOf4Single as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfVectorOf8Single as i32 => {
+                    if header_version == 1 {
+                        str_build.push_str(&serialize_vec(&segment));
+                    } else {
+                        str_build.push_str(&serialize_vec(&segment));
+                    }
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ByteBool as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::EncodedString as i32 => {
+                    str_build.push_str(&serialize_single_value_string(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::IdType3 as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::IdType2 as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::Id as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::Int32 as i32 => {
+                    // There are doubts with “nil” values if value is "null"
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::Int64 as i32 => {
+                    // There are doubts with “nil” values if value is "null"
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::UInt32Type2 as i32 => {
+                    // There are doubts with “nil” values if value is "null"
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::UInt32 as i32 => {
+                    // There are doubts with “nil” values if value is "null"
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::UInt64 as i32 => {
+                    // There are doubts with “nil” values if value is "null"
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::UInt16 as i32 => {
+                    // There are doubts with “nil” values if value is "null"
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::OrdinalString as i32 => {
+                    str_build.push_str(&serialize_single_value_string(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::Single as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::UTF8String as i32 => {
+                    str_build.push_str(&serialize_utf8_string(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::VectorOf2Single as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::VectorOf3Int32 as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::VectorOf3Single as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::VectorOf4Single as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::VectorOf8Single as i32 => {
+                    if header_version == 1 {
+                        str_build.push_str(&serialize_single_value(&segment));
+                    } else {
+                        str_build.push_str(&serialize_single_value(&segment));
+                    }
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfInt64 as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfVectorOf2Single as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::Int16 as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfInt16 as i32 => {
+                    str_build.push_str(&serialize_vec(&segment));
+                    continue;
+                }
+                x if x == DataTypeIdFormat::ArrayOfVectorOf2Int32 as i32 => {
+                    str_build.push_str(&serialize_single_value(&segment));
+                    continue;
+                }
+                0 => {
+                    continue;
+                }
+                _ => {
+                    panic!("Unknown data type: {}", data_type);
+                }
+            }
+        }
+    }
+
+    str_build
+}
+
+fn serialize_vec(data: &BsiiDataSegment) -> String {
+    let value = &data.value;
+    let mut text = String::new();
+
+    text.push_str(&format!("{}{}: {}\n", IDENT, data.name, value.len()));
+
+    for (i, val) in value.iter().enumerate() {
+        text.push_str(&format!("{}{}[{}]: {}\n", IDENT, data.name, i, val));
+    }
+
+    text
+}
+
+fn serialize_single_value(data: &BsiiDataSegment) -> String {
+    let value = &data.value;
+
+    format!("{}{}: {}\n", IDENT, data.name, value[0])
+}
+
+fn serialize_single_value_string(data: &BsiiDataSegment) -> String {
+    let value = &data.value[0];
+
+    format!(
+        "{}{}: {}\n",
+        IDENT,
+        data.name,
+        if value.is_empty() { "\"\"" } else { value }
+    )
+}
+
+// Match SII_Decrypt's UTF8 byte escapes. Already-escaped ASCII remains unchanged.
+fn escape_non_ascii(value: &str) -> String {
+    let mut out = String::new();
+    for b in value.bytes() {
+        if b >= 128 {
+            out.push_str(&format!("\\x{b:02x}"));
+        } else {
+            out.push(b as char);
+        }
+    }
+    out
+}
+
+fn serialize_utf8_string_vec(data: &BsiiDataSegment) -> String {
+    let value = &data.value;
+    let mut text = String::new();
+
+    text.push_str(&format!("{}{}: {}\n", IDENT, data.name, value.len()));
+
+    for (i, val) in value.iter().enumerate() {
+        if val.parse::<u32>().is_ok() {
+            text.push_str(&format!("{}{}[{}]: {}\n", IDENT, data.name, i, val));
+        } else {
+            if val.is_empty() {
+                text.push_str(&format!("{}{}[{}]: \"\"\n", IDENT, data.name, i));
+            } else {
+                if is_limited_alphabet(val) {
+                    text.push_str(&format!(
+                        "{}{}[{}]: {}\n",
+                        IDENT,
+                        data.name,
+                        i,
+                        escape_non_ascii(val)
+                    ));
+                } else {
+                    text.push_str(&format!(
+                        "{}{}[{}]: \"{}\"\n",
+                        IDENT,
+                        data.name,
+                        i,
+                        escape_non_ascii(val)
+                    ));
+                }
+            }
+        }
+    }
+
+    text
+}
+
+fn serialize_utf8_string(data: &BsiiDataSegment) -> String {
+    let value = &data.value[0];
+    let mut text = format!("{}{}: ", IDENT, data.name);
+
+    if let Ok(_) = value.parse::<i32>() {
+        text.push_str(&format!("{}\n", value));
+    } else {
+        if value.is_empty() {
+            text.push_str("\"\"\n");
+        } else {
+            if is_limited_alphabet(value) {
+                text.push_str(&format!("{}\n", value));
+            } else {
+                text.push_str(&format!("\"{}\"\n", escape_non_ascii(value)));
+            }
+        }
+    }
+
+    text
+}
+
+fn is_limited_alphabet(value: &str) -> bool {
+    for c in value.chars() {
+        if !LIMITED_ALPHABET.contains(&c) {
+            return false;
+        }
+    }
+
+    true
+}
+
+pub fn serializer(data: &BSIIData) -> Vec<u8> {
+    let mut str_build = String::new();
+    str_build.push_str("SiiNunit\n{\n");
+
+    let mut partial_results: Vec<(u32, String)> = data
+        .decoded_blocks
+        .par_iter()
+        .filter_map(|block| {
+            if block.name.is_empty() || block.id.value.is_empty() {
+                return None;
+            }
+
+            Some((
+                block.order_pos,
+                format!(
+                    "{} : {} {{\n{}}}\n\n",
+                    block.name,
+                    block.id.value,
+                    segment_serialize(block, data.header.version)
+                ),
+            ))
+        })
+        .collect();
+
+    partial_results.sort_by_key(|(pos, _)| *pos);
+
+    for (_, value) in partial_results {
+        str_build.push_str(&value);
+    }
+
+    str_build.push('}');
+    str_build.into_bytes()
+}

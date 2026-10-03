@@ -1,0 +1,29 @@
+__pycache__/
+experiments/
+.tools/
+node_modules/
+dist/
+target/
+release/
+verification/
+/tools/
+
+# Generated Tauri schemas and local environment / credentials
+/src-tauri/gen/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.log
+.DS_Store
+Thumbs.db
+
+# Player data must never enter source control (synthetic BSII tests are separate)
+*.sii
+*.scs
+/private/
+settings.json
+catalog.json

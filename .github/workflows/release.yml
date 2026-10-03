@@ -1,0 +1,74 @@
+name: Release Windows
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag, for example v0.1.0"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate tag input
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Expected a version tag such as v0.1.0' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ github.event.inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install Rust MSVC
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rustfmt
+          if ($LASTEXITCODE) { throw 'Rust installation failed' }
+          rustup default stable-x86_64-pc-windows-msvc
+          if ($LASTEXITCODE) { throw 'Rust toolchain selection failed' }
+      - name: Build, test and package
+        run: ./scripts/build.ps1 -ExpectedTag $env:RELEASE_TAG
+      - name: Ensure builds do not change dependency locks
+        run: |
+          git diff --exit-code -- package-lock.json src-tauri/Cargo.lock
+          if ($LASTEXITCODE) { throw 'Dependency locks changed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x64-${{ env.RELEASE_TAG }}
+          path: |
+            release/artifacts/*.zip
+            release/artifacts/*.sha256
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $zip = "release/artifacts/ets2-workshop-$version-windows-x64.zip"
+          # A rerun may replace assets, but cannot accidentally create a missing tag.
+          gh release view $env:RELEASE_TAG --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG $zip "$zip.sha256" --clobber
+          } else {
+            $releaseArgs = @('release', 'create', $env:RELEASE_TAG, $zip, "$zip.sha256", '--verify-tag', '--title', "ETS2 Workshop $env:RELEASE_TAG", '--generate-notes')
+            if ($version.Contains('-')) { $releaseArgs += '--prerelease' }
+            gh @releaseArgs
+          }
+          if ($LASTEXITCODE) { throw 'Release upload failed' }

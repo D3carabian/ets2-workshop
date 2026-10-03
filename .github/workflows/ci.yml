@@ -1,0 +1,36 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install Rust MSVC
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rustfmt
+          if ($LASTEXITCODE) { throw 'Rust installation failed' }
+          rustup default stable-x86_64-pc-windows-msvc
+          if ($LASTEXITCODE) { throw 'Rust toolchain selection failed' }
+      - name: Check format, frontend and Rust tests
+        run: ./scripts/build.ps1 -CheckOnly
+      - name: Ensure builds do not change dependency locks
+        run: |
+          git diff --exit-code -- package-lock.json src-tauri/Cargo.lock
+          if ($LASTEXITCODE) { throw 'Dependency locks changed' }
