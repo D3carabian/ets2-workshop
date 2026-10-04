@@ -54,6 +54,12 @@
 
 ### 存档与备份
 
+**请使用本地手动存档。** 如果档案启用了 Steam 云存档，请先在游戏主菜单的“编辑档案”中关闭“使用 Steam 云”，进入游戏重新手动保存，退出游戏后再用本工具打开该存档。本工具能发现部分 Steam 云存档的本地副本，但这不代表云端同步、覆盖和冲突处理已经验证；当前不将开启云同步的存档作为受支持的编辑流程。
+
+**卡车世界（World of Trucks）兼容性尚未验证。** 已检查的参考项目说明没有将“绑定卡车世界账号”列为一律不能编辑的条件，但本工具也不保证此类档案及混搭车辆适用于外部任务。建议先完成或取消正在进行的外部合同、外部货运，再制作本地手动存档进行修改；本工具不修改卡车世界服务器上的任务、活动进度或其他在线数据。
+
+云存档使用提示参考：[Truck Tools](https://github.com/CoffeSiberian/truck-tools/blob/main/src/translations/en-US.json)、[TSSE 作者说明](https://forum.scssoft.com/viewtopic.php?t=266092)、[ETS666 使用步骤](https://github.com/ets666/ets666-tool#how-to-use)。
+
 存档列表默认显示手动存档和快速存档；勾选“包含自动存档”即可显示 autosave，程序会记住选择。未变化的名称会复用缓存，刷新仍会检查新存档和改名。
 
 默认另存新档。覆盖或恢复前，请退出游戏并暂停会写入该槽位的同步及其他程序；写前校验和原子替换不能保证与外部程序同时写入时不丢失进度。
@@ -107,6 +113,12 @@ In-game tests with ETS2 1.61 confirmed that a Scania S could use an independent 
 After upgrading, use Settings → Build / update library to load in-game names. Internal components without a game name keep their category and original identifier.
 
 ### Saves and backups
+
+**Use a local manual save.** If Steam Cloud is enabled for the profile, turn off "Use Steam Cloud" in the game's main menu → Edit Profile, enter the game and make a new manual save, then exit the game before opening that save in this tool. The app can discover some local copies of Steam Cloud saves, but cloud synchronization, overwrites and conflict handling have not been validated. Editing saves with cloud synchronization enabled is currently outside the supported workflow.
+
+**World of Trucks compatibility has not been verified.** The reference documentation checked does not state that linking a World of Trucks account alone makes a profile uneditable. However, this tool does not guarantee compatibility for those profiles or mixed-brand trucks in external jobs. We recommend completing or canceling active External Contracts or External Market jobs before making a local manual save to edit. The tool does not modify server-side World of Trucks jobs, event progress or other online data.
+
+Cloud-save guidance references: [Truck Tools](https://github.com/CoffeSiberian/truck-tools/blob/main/src/translations/en-US.json), [TSSE author's instructions](https://forum.scssoft.com/viewtopic.php?t=266092), and [ETS666 usage instructions](https://github.com/ets666/ets666-tool#how-to-use).
 
 The list shows manual saves and quicksaves by default. Enable “Include autosaves” to show autosave slots; the app remembers your choice. Unchanged names are cached, while refreshing still checks for new or renamed saves.
 
