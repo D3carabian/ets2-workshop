@@ -21,6 +21,7 @@
 ### 能改什么
 
 - 查看所有自有卡车，以及每辆车的配件。
+- 中英文界面切换，按游戏名称搜索配件，比较品牌、型号与关键参数。
 - 更换柴油发动机、变速箱、独立油箱，以及对应位置的轮胎和轮毂。
 - 更换部分外观件，也可以从其他自有卡车复制部分警示灯、格栅和遮阳板。添加时需要车型、驾驶室、底盘相同，且安装位置可用。
 - 保存前预览修改，另存为新存档，或自动备份后覆盖原档。
@@ -34,6 +35,8 @@
 维修站的改装升级可能把混搭配件换回原厂配置。此前测试中，普通维修和维修界面的部件更换保留了改装，但并非所有组合都经过验证。
 
 已有 ETS2 1.61 的游戏内测试确认：Scania S 可以使用 DAF 的 1465 L 独立油箱和 Volvo 的 780 hp 发动机。更大马力不一定意味着更高极速，工具也不会预测精确极速。
+
+已有用户升级后，可在“设置 → 建立 / 更新目录”中读取游戏名称。没有官方名称的内部组件会保留类别与原始标识。
 
 ### 存档与备份
 
@@ -64,6 +67,7 @@ No separate save decryption tool is needed. If WebView2, Microsoft's component f
 ### What you can do
 
 - Browse all owned trucks and every part fitted to them.
+- Switch between Chinese and English, search in-game part names, and compare brands, models, and key specifications.
 - Replace diesel engines, transmissions, independent fuel tanks, and tires and rims in their corresponding positions.
 - Replace some appearance parts, or copy certain beacons, grilles, and sunshields from another owned truck. Adding parts requires the same truck model, cabin, and chassis, with an available mounting position.
 - Preview changes, save to a new slot, or overwrite a save after an automatic backup.
@@ -77,6 +81,8 @@ Core parts such as engines can only be replaced; you cannot add a second one. Ch
 Customizing your truck at a service station may reset mixed-brand parts to factory options. In earlier tests, normal repairs and parts replacement through the repair menu preserved the modifications, but not every combination has been tested.
 
 In-game tests with ETS2 1.61 confirmed that a Scania S could use an independent DAF 1,465 L tank and a Volvo 780 hp engine. More horsepower does not always mean a higher top speed, and the app does not predict exact top speeds.
+
+After upgrading, use Settings → Build / update library to load in-game names. Internal components without a game name keep their category and original identifier.
 
 ### Saves and backups
 

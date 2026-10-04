@@ -7,16 +7,35 @@ const source = await readFile(
   new URL("../src/parts.ts", import.meta.url),
   "utf8",
 );
+const translationSource = await readFile(
+  new URL("../src/i18n-core.ts", import.meta.url),
+  "utf8",
+);
+const translationJs = ts.transpileModule(translationSource, {
+  compilerOptions: {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+  },
+}).outputText;
+const translationUrl = `data:text/javascript;base64,${Buffer.from(translationJs).toString("base64")}`;
 const js = ts.transpileModule(source, {
   compilerOptions: {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext,
   },
 }).outputText;
-const { describePart, power, primaryMetrics, groupOf, truckDefinition } =
-  await import(
-    `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`
-  );
+const {
+  describePart,
+  power,
+  primaryMetrics,
+  groupOf,
+  truckDefinition,
+  compareParts,
+  replacementReason,
+  candidateReason,
+} = await import(
+  `data:text/javascript;base64,${Buffer.from(js.replace("./i18n-core", translationUrl)).toString("base64")}`
+);
 function definition(category = "engine", name = "mx13 315", metrics = {}) {
   return {
     name,
@@ -134,4 +153,72 @@ test("literal game names that differ from the filename remain visible", () => {
     model: "scania.s_2016",
   };
   assert.match(describePart(def).title, /Highline/);
+});
+
+test("installed game names take priority in each language and remain searchable across languages", () => {
+  const def = {
+    ...definition("cabin", "data"),
+    raw_name: "@@test_cabin@@",
+    names: { en: "Game Cabin", zh_cn: "游戏内驾驶室" },
+  };
+  assert.match(describePart(def, undefined, "zh").title, /游戏内驾驶室/);
+  assert.match(describePart(def, undefined, "en").title, /Game Cabin/);
+  assert.equal(describePart(def).nameSource, "game");
+  assert.ok(describePart(def, undefined, "en").search.includes("游戏内驾驶室"));
+});
+test("brand-specific parts sort before shared and unidentified models regardless of file order", () => {
+  const branded = definition("chassis", "4x2");
+  const shared = {
+    ...definition("f_tire", "standard"),
+    model: "通用",
+    path: "/def/vehicle/f_tire/standard.sii",
+  };
+  const unknown = { ...definition("engine", "unknown"), model: "future.maker" };
+  assert.deepEqual(
+    [unknown, shared, branded].sort(compareParts).map((d) => d.path),
+    [branded, shared, unknown].map((d) => d.path),
+  );
+});
+test("UI explains locked core parts, unknown definitions and non-diesel candidates", () => {
+  const part = {
+    ...definition(),
+    definition: definition(),
+    kind: "vehicle_accessory",
+  };
+  assert.equal(replacementReason(part), null);
+  assert.match(
+    replacementReason({ ...part, category: "chassis" }),
+    /暂不支持替换/,
+  );
+  assert.match(replacementReason({ ...part, definition: null }), /定义未知/);
+  assert.match(
+    candidateReason(
+      part,
+      { ...definition(), metrics: { type: "electric" } },
+      "daf.2021",
+      "replace",
+      "engine",
+    ),
+    /柴油/,
+  );
+  assert.match(
+    candidateReason(part, definition(), "daf.2021", "add", "engine"),
+    /不可追加/,
+  );
+});
+
+test("addition rejects missing definitions and a known wrong truck model before staging", () => {
+  const beacon = { ...definition("beacon", "light"), model: "volvo.fh_2024" };
+  assert.match(
+    candidateReason(undefined, null, "daf.2021", "add", "beacon"),
+    /定义未知/,
+  );
+  assert.match(
+    candidateReason(undefined, beacon, "daf.2021", "add", "beacon"),
+    /车型不匹配/,
+  );
+  assert.equal(
+    candidateReason(undefined, beacon, "volvo.fh_2024", "add", "beacon"),
+    null,
+  );
 });

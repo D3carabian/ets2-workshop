@@ -9,6 +9,10 @@ export type Definition = {
   kind: string;
   unit: string;
   name: string;
+  raw_name?: string;
+  names?: Record<string, string>;
+  category_names?: Record<string, string>;
+  name_alias?: string | null;
   category: string;
   model: string;
   source: string;

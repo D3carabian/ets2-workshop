@@ -37,6 +37,7 @@ const sourceFiles = new Map(Object.values(supplements).flatMap(s => s.files)
 for (const file of ['licenses/DecryptTruck-MIT.txt', 'src-tauri/vendor/decrypt-truck/LICENSE']) {
   sourceFiles.set(file, '3c64dbae48fba3efd8591f8e7e41ca6b9df76b9b2b3425f1e5c41c82a2f28b9c');
 }
+sourceFiles.set('licenses/locale-cityhash-MIT.txt', '66fcd1b1151ab846f3404929de135c868ce1c66b74c4bff8b48dda490a3a7621');
 for (const [relative, expectedHash] of sourceFiles) {
   const actualHash = createHash('sha256').update(fs.readFileSync(path.join(root, relative))).digest('hex');
   if (actualHash !== expectedHash) throw new Error(`Source license hash mismatch: ${relative}`);

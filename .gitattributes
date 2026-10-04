@@ -2,3 +2,5 @@
 /licenses/upstream/** -text
 /licenses/DecryptTruck-MIT.txt -text
 /src-tauri/vendor/decrypt-truck/LICENSE -text
+
+/licenses/locale-cityhash-MIT.txt -text whitespace=cr-at-eol

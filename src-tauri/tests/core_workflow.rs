@@ -28,6 +28,10 @@ fn fixture() -> (Document, Catalog) {
         c.definitions.insert(
             path.clone(),
             Definition {
+                raw_name: String::new(),
+                names: std::collections::BTreeMap::new(),
+                category_names: std::collections::BTreeMap::new(),
+                name_alias: None,
                 path,
                 kind: kind.into(),
                 unit: format!("{file}.{model}.{cat}"),

@@ -1,6 +1,6 @@
 /* Keep scrolling local to each working area, including at the minimum window size. */
 .workspace .garage-grid {
-  height: max(380px, calc(100dvh - 320px));
+  height: var(--garage-height, max(240px, calc(100dvh - 320px)));
   align-items: stretch;
 }
 .garage-grid > * {
@@ -134,5 +134,22 @@
 }
 .garage-grid .fleet > .button-row button {
   padding: 7px 3px;
+  font-size: 11px;
+}
+
+.catalog-filters {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin: 0 0 16px;
+}
+.catalog-filters p {
+  margin: 0;
+  font-size: 12px;
+}
+.catalog-pagination,
+.candidate-pagination {
+  align-items: center;
+  justify-content: space-between;
   font-size: 11px;
 }

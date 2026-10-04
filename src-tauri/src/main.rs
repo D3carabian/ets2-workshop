@@ -29,7 +29,7 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
     };
     match field(&v, "action")? {
         "init" => Ok(
-            json!({"settings":engine.settings,"catalog_count":engine.catalog.definitions.len(),"catalog_warnings":engine.catalog.warnings,"data_dir":storage::app_dir(),"needs_setup":engine.settings.onboarding_version!=workshop_core::setup::SETUP_VERSION || engine.catalog.definitions.is_empty()}),
+            json!({"settings":engine.settings,"catalog_count":engine.catalog.definitions.len(),"catalog_name_schema":engine.catalog.name_schema,"catalog_warnings":engine.catalog.warnings,"data_dir":storage::app_dir(),"needs_setup":engine.settings.onboarding_version!=workshop_core::setup::SETUP_VERSION || engine.catalog.definitions.is_empty()}),
         ),
         "detect" => Ok(json!(workshop_core::setup::detect())),
         "setup" => {

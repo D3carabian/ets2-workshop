@@ -18,6 +18,10 @@ fn fixture(root: &Path) -> (Session, Catalog, Vec<Operation>) {
         catalog.definitions.insert(
             path.clone(),
             Definition {
+                raw_name: String::new(),
+                names: std::collections::BTreeMap::new(),
+                category_names: std::collections::BTreeMap::new(),
+                name_alias: None,
                 path,
                 kind: "accessory_engine_data".into(),
                 unit: name.into(),

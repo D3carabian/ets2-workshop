@@ -1,0 +1,28 @@
+.language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin: 0;
+}
+.language-picker select {
+  width: auto;
+  min-width: 104px;
+  padding: 6px 8px;
+}
+.onboarding > .language-picker {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.source-message details {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+html[lang="en"] .nav {
+  white-space: normal;
+}
+html[lang="en"] .header-right {
+  gap: 10px;
+  flex-wrap: wrap;
+}

@@ -331,6 +331,10 @@ mod failure_tests {
         let s: Settings =
             serde_json::from_value(serde_json::json!({"game":game,"documents":documents})).unwrap();
         let d = Definition {
+            raw_name: String::new(),
+            names: std::collections::BTreeMap::new(),
+            category_names: std::collections::BTreeMap::new(),
+            name_alias: None,
             path: "/def/vehicle/truck/test/engine/test.sii".into(),
             kind: "accessory_engine_data".into(),
             unit: "test".into(),
