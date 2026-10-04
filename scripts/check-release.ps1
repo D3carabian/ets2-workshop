@@ -23,6 +23,7 @@ if ($version -cne $lock.version -or $version -cne $lock.packages[''].version -or
 if ($ExpectedTag -and $ExpectedTag -cne "v$version") { throw "Tag $ExpectedTag does not match v$version." }
 $licenseFiles = @(
     'DecryptTruck-MIT.txt'
+    'locale-cityhash-MIT.txt'
     'upstream/SOURCES.md'
     'upstream/alloc-stdlib/LICENSE.txt'
     'upstream/defmt-parser/LICENSE-APACHE.txt'

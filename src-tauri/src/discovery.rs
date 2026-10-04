@@ -7,7 +7,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -97,26 +97,49 @@ fn optional_text(path: &Path) -> Result<Option<String>> {
         Err(e) => Err(failure(path, e)),
     }
 }
-fn directories(path: &Path) -> Result<Vec<PathBuf>> {
-    let Some(metadata) = optional_metadata(path)? else {
-        return Ok(vec![]);
-    };
-    if !metadata.is_dir() {
-        return Err(failure(path, "该路径不是文件夹"));
-    }
-    let mut paths = Vec::new();
-    for entry in fs::read_dir(path).map_err(|e| failure(path, e))? {
-        let entry = entry.map_err(|e| failure(path, e))?;
-        if entry
-            .metadata()
-            .map_err(|e| failure(&entry.path(), e))?
-            .is_dir()
-        {
-            paths.push(entry.path());
+fn reported<T>(warnings: &mut Vec<String>, result: Result<T>) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
+            if !warnings.contains(&error) {
+                warnings.push(error);
+            }
+            None
         }
     }
-    paths.sort();
-    Ok(paths)
+}
+fn entries(path: &Path, warnings: &mut Vec<String>) -> Vec<(PathBuf, fs::Metadata)> {
+    let Some(Some(metadata)) = reported(warnings, optional_metadata(path)) else {
+        return vec![];
+    };
+    if !metadata.is_dir() {
+        note(warnings, Err(failure(path, "该路径不是文件夹")));
+        return vec![];
+    }
+    let Some(entries) = reported(warnings, fs::read_dir(path).map_err(|e| failure(path, e))) else {
+        return vec![];
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let Some(entry) = reported(warnings, entry.map_err(|e| failure(path, e))) else {
+            continue;
+        };
+        let Some(metadata) = reported(
+            warnings,
+            entry.metadata().map_err(|e| failure(&entry.path(), e)),
+        ) else {
+            continue;
+        };
+        paths.push((entry.path(), metadata));
+    }
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    paths
+}
+fn directories(path: &Path, warnings: &mut Vec<String>) -> Vec<PathBuf> {
+    entries(path, warnings)
+        .into_iter()
+        .filter_map(|(path, metadata)| metadata.is_dir().then_some(path))
+        .collect()
 }
 fn add(paths: &mut Vec<String>, path: &Path) -> Result<()> {
     let Some(metadata) = optional_metadata(path)? else {
@@ -136,11 +159,7 @@ fn add(paths: &mut Vec<String>, path: &Path) -> Result<()> {
     Ok(())
 }
 fn note(notes: &mut Vec<String>, result: Result<()>) {
-    if let Err(error) = result {
-        if !notes.contains(&error) {
-            notes.push(error);
-        }
-    }
+    let _ = reported(notes, result);
 }
 
 #[derive(Debug)]
@@ -313,33 +332,32 @@ pub fn detect(inputs: &DiscoveryInputs) -> Detection {
                 note(&mut result.notes, add_game(&mut result.games, &game));
             }
         }
-        match directories(&root.join("userdata")) {
-            Ok(users) => {
-                for user in users {
-                    let remote = user.join("227300/remote");
-                    match optional_metadata(&remote.join("profiles")) {
-                        Ok(Some(m)) if m.is_dir() => {
-                            note(&mut result.notes, add(&mut result.documents, &remote))
+        for user in directories(&root.join("userdata"), &mut result.notes) {
+            let remote = user.join("227300/remote");
+            match optional_metadata(&remote.join("profiles")) {
+                Ok(Some(m)) if m.is_dir() => {
+                    note(&mut result.notes, add(&mut result.documents, &remote))
+                }
+                Ok(Some(_)) => note(
+                    &mut result.notes,
+                    Err(failure(&remote.join("profiles"), "该路径不是文件夹")),
+                ),
+                Err(e) => result.notes.push(e),
+                _ => (),
+            }
+            match optional_text(&user.join("config/localconfig.vdf")) {
+                Ok(Some(text)) => {
+                    let mut options = vec![];
+                    visit_launch_options(&keyvalues(&text), &mut options);
+                    for command in options {
+                        if let Some(home) = command_home(&command) {
+                            note(&mut result.notes, add(&mut result.documents, &home));
                         }
-                        Err(e) => result.notes.push(e),
-                        _ => (),
-                    }
-                    match optional_text(&user.join("config/localconfig.vdf")) {
-                        Ok(Some(text)) => {
-                            let mut options = vec![];
-                            visit_launch_options(&keyvalues(&text), &mut options);
-                            for command in options {
-                                if let Some(home) = command_home(&command) {
-                                    note(&mut result.notes, add(&mut result.documents, &home));
-                                }
-                            }
-                        }
-                        Err(e) => result.notes.push(e),
-                        _ => (),
                     }
                 }
+                Err(e) => result.notes.push(e),
+                _ => (),
             }
-            Err(e) => result.notes.push(e),
         }
     }
     // Process newly discovered homes too, with canonical deduplication bounding cycles.
@@ -376,107 +394,368 @@ fn add_game(games: &mut Vec<String>, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Preflight only the selected user-data tree before committing first-run settings.
-/// This enumerates directories without decoding or reading any save contents.
+/// Validate only the selected root; individual profiles and slots can fail independently.
 pub fn validate_documents(documents: &Path) -> Result<()> {
     if !optional_metadata(documents)?.is_some_and(|m| m.is_dir()) {
         return Err(failure(documents, "存档目录不存在或不是文件夹"));
     }
-    directories(documents)?;
-    for name in ["profiles", "steam_profiles"] {
-        for profile in directories(&documents.join(name))? {
-            directories(&profile)?;
-            for slot in directories(&profile.join("save"))? {
-                // Interrupted Workshop staging directories are private, never selectable saves.
-                if slot
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with(".workshop-")
-                {
-                    continue;
-                }
-                directories(&slot)?;
-            }
-        }
+    for entry in fs::read_dir(documents).map_err(|e| failure(documents, e))? {
+        entry.map_err(|e| failure(documents, e))?;
     }
     Ok(())
 }
 
+/// Successful names are cached; actual info bytes are checked on every scan.
+#[derive(Default)]
+pub struct SaveListCache {
+    names: HashMap<String, CachedSaveName>,
+    warnings: Vec<String>,
+}
+struct CachedSaveName {
+    digest: String,
+    name: String,
+    is_autosave: bool,
+}
+pub fn is_autosave(slot: &str) -> bool {
+    let slot = slot.to_ascii_lowercase();
+    slot == "autosave" || slot.starts_with("autosave_")
+}
 pub fn discover(documents: &Path, inputs: &DiscoveryInputs) -> Result<Vec<SaveEntry>> {
-    if !optional_metadata(documents)?.is_some_and(|m| m.is_dir()) {
-        return Err(failure(documents, "存档目录不存在或不是文件夹"));
+    SaveListCache::default().discover(documents, inputs, true)
+}
+impl SaveListCache {
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
-    let mut roots = vec![documents.join("profiles"), documents.join("steam_profiles")];
-    for steam in &inputs.steam_roots {
-        for user in directories(&steam.join("userdata"))? {
-            roots.push(user.join("227300/remote/profiles"));
-        }
+    pub fn discover(
+        &mut self,
+        documents: &Path,
+        inputs: &DiscoveryInputs,
+        include_autosaves: bool,
+    ) -> Result<Vec<SaveEntry>> {
+        self.discover_with_decoder(documents, inputs, include_autosaves, &|path, bytes| {
+            if bytes.starts_with(b"SiiNunit") {
+                decoder::decode_direct(bytes)
+            } else {
+                decoder::read(path)
+            }
+        })
     }
-    let mut seen_roots = HashSet::new();
-    let mut seen_saves = HashSet::new();
-    let mut out = Vec::new();
-    for root in roots {
-        if optional_metadata(&root)?.is_none() {
-            continue;
+    fn discover_with_decoder(
+        &mut self,
+        documents: &Path,
+        inputs: &DiscoveryInputs,
+        include_autosaves: bool,
+        decode: &dyn Fn(&Path, &[u8]) -> Result<String>,
+    ) -> Result<Vec<SaveEntry>> {
+        self.warnings.clear();
+        validate_documents(documents)?;
+        let mut roots = vec![documents.join("profiles"), documents.join("steam_profiles")];
+        for steam in &inputs.steam_roots {
+            for user in directories(&steam.join("userdata"), &mut self.warnings) {
+                roots.push(user.join("227300/remote/profiles"));
+            }
         }
-        let canonical = fs::canonicalize(&root).map_err(|e| failure(&root, e))?;
-        if !seen_roots.insert(identity(&canonical)) {
-            continue;
-        }
-        for profile in directories(&root)? {
-            for slot in directories(&profile.join("save"))? {
-                // Interrupted Workshop staging directories are private, never selectable saves.
-                if slot
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with(".workshop-")
-                {
+        let mut seen_roots = HashSet::new();
+        let mut seen_saves = HashSet::new();
+        let mut out = Vec::new();
+        for root in roots {
+            let profiles = directories(&root, &mut self.warnings);
+            if profiles.is_empty() {
+                continue;
+            }
+            let Some(canonical) = reported(
+                &mut self.warnings,
+                fs::canonicalize(&root).map_err(|e| failure(&root, e)),
+            ) else {
+                continue;
+            };
+            if !seen_roots.insert(identity(&canonical)) {
+                continue;
+            }
+            for profile in profiles {
+                let Some((save_dir, _)) =
+                    entries(&profile, &mut self.warnings)
+                        .into_iter()
+                        .find(|(path, _)| {
+                            path.file_name().is_some_and(|name| {
+                                name.to_string_lossy().eq_ignore_ascii_case("save")
+                            })
+                        })
+                else {
                     continue;
-                }
-                let path = slot.join("game.sii");
-                if !optional_metadata(&path)?.is_some_and(|m| m.is_file()) {
-                    continue;
-                }
-                let path = fs::canonicalize(&path).map_err(|e| failure(&path, e))?;
-                if !seen_saves.insert(identity(&path)) {
-                    continue;
-                }
-                let info = slot.join("info.sii");
-                let metadata = fs::metadata(&path).map_err(|e| failure(&path, e))?;
-                let modified = metadata
-                    .modified()
-                    .map_err(|e| failure(&path, e))?
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let (name, error) = match decoder::read(&info).and_then(Document::parse) {
-                    Ok(doc) => (
-                        doc.units
+                };
+                for slot in directories(&save_dir, &mut self.warnings) {
+                    // Interrupted Workshop staging directories are private, never selectable saves.
+                    if slot
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with(".workshop-")
+                    {
+                        continue;
+                    }
+                    let slot_name = slot.file_name().unwrap().to_string_lossy();
+                    let is_autosave = is_autosave(&slot_name);
+                    if is_autosave && !include_autosaves {
+                        continue;
+                    }
+                    let Some((path, metadata)) = entries(&slot, &mut self.warnings)
+                        .into_iter()
+                        .find(|(path, _)| {
+                            path.file_name().is_some_and(|name| {
+                                name.to_string_lossy().eq_ignore_ascii_case("game.sii")
+                            })
+                        })
+                    else {
+                        continue;
+                    };
+                    if !metadata.is_file() {
+                        note(&mut self.warnings, Err(failure(&path, "该路径不是文件")));
+                        continue;
+                    }
+                    let Some(path) = reported(
+                        &mut self.warnings,
+                        fs::canonicalize(&path).map_err(|e| failure(&path, e)),
+                    ) else {
+                        continue;
+                    };
+                    if !seen_saves.insert(identity(&path)) {
+                        continue;
+                    }
+                    let info = slot.join("info.sii");
+                    let Some(modified) = reported(
+                        &mut self.warnings,
+                        metadata.modified().map_err(|e| failure(&path, e)),
+                    ) else {
+                        continue;
+                    };
+                    let modified = modified
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let key = identity(&path);
+                    let result = (|| -> Result<String> {
+                        let bytes = decoder::read_bounded(&info)?;
+                        let digest = crate::hash(&bytes);
+                        if let Some(previous) = self.names.get(&key) {
+                            if previous.digest == digest {
+                                return Ok(previous.name.clone());
+                            }
+                        }
+                        let doc = Document::parse(decode(&info, &bytes)?)?;
+                        let name = doc
+                            .units
                             .first()
                             .and_then(|u| u.get("name"))
                             .map(unquote)
                             .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| slot.file_name().unwrap().to_string_lossy().into()),
-                        None,
-                    ),
-                    Err(error) => ("无法读取名称".into(), Some(failure(&info, error))),
-                };
-                out.push(SaveEntry {
-                    path: display(&path),
-                    name,
-                    profile: profile.file_name().unwrap().to_string_lossy().into(),
-                    modified,
-                    error,
-                });
+                            .unwrap_or_else(|| slot_name.to_string());
+                        if crate::hash(&decoder::read_bounded(&info)?) != digest {
+                            return Err("读取时存档信息发生变化，请刷新重试".into());
+                        }
+                        self.names.insert(
+                            key.clone(),
+                            CachedSaveName {
+                                digest,
+                                name: name.clone(),
+                                is_autosave,
+                            },
+                        );
+                        Ok(name)
+                    })();
+                    let (name, error) = match result {
+                        Ok(name) => (name, None),
+                        Err(error) => {
+                            self.names.remove(&key);
+                            ("无法读取名称".into(), Some(failure(&info, error)))
+                        }
+                    };
+                    out.push(SaveEntry {
+                        path: display(&path),
+                        name,
+                        profile: profile.file_name().unwrap().to_string_lossy().into(),
+                        modified,
+                        is_autosave,
+                        error,
+                    });
+                }
             }
         }
+        // A display filter must not discard names that were already decoded.
+        // Hidden autosaves are checked for changes/deletion when shown again.
+        self.names.retain(|key, cached| {
+            seen_saves.contains(key) || (!include_autosaves && cached.is_autosave)
+        });
+        out.sort_by(|a, b| {
+            b.modified
+                .cmp(&a.modified)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        Ok(out)
     }
-    out.sort_by(|a, b| {
-        b.modified
-            .cmp(&a.modified)
-            .then_with(|| a.path.cmp(&b.path))
-    });
-    Ok(out)
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use std::cell::Cell;
+    fn save(root: &Path, slot: &str, name: &str) -> PathBuf {
+        let dir = root.join("profiles/test/save").join(slot);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("game.sii"), "SiiNunit {\n}\n").unwrap();
+        fs::write(
+            dir.join("info.sii"),
+            format!("SiiNunit {{\nsave_container : test {{\n name: \"{name}\"\n}}\n}}\n"),
+        )
+        .unwrap();
+        dir
+    }
+    #[test]
+    fn filtering_happens_before_decode_and_keeps_quicksaves() {
+        let root = tempfile::tempdir().unwrap();
+        save(root.path(), "autosave", "auto");
+        save(root.path(), "AUTOSAVE_JOB_1", "auto");
+        save(root.path(), "quicksave", "quick");
+        save(root.path(), "1", "autosave road trip");
+        let calls = Cell::new(0);
+        let decode = |_: &Path, bytes: &[u8]| {
+            calls.set(calls.get() + 1);
+            decoder::decode_direct(bytes)
+        };
+        let mut cache = SaveListCache::default();
+        let inputs = DiscoveryInputs::default();
+        let list = cache
+            .discover_with_decoder(root.path(), &inputs, false, &decode)
+            .unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(calls.get(), 2);
+        assert!(list.iter().all(|s| !s.is_autosave));
+        let list = cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap();
+        assert_eq!(list.len(), 4);
+        assert_eq!(calls.get(), 4);
+        cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap();
+        assert_eq!(calls.get(), 4);
+    }
+    #[test]
+    fn hidden_autosaves_stay_warm_but_are_revalidated_when_shown() {
+        let root = tempfile::tempdir().unwrap();
+        let slot = save(root.path(), "autosave", "first");
+        let calls = Cell::new(0);
+        let decode = |_: &Path, bytes: &[u8]| {
+            calls.set(calls.get() + 1);
+            decoder::decode_direct(bytes)
+        };
+        let inputs = DiscoveryInputs::default();
+        let mut cache = SaveListCache::default();
+        for include in [true, true, false, true] {
+            let list = cache
+                .discover_with_decoder(root.path(), &inputs, include, &decode)
+                .unwrap();
+            assert_eq!(list.len(), usize::from(include));
+        }
+        assert_eq!(calls.get(), 1);
+        cache
+            .discover_with_decoder(root.path(), &inputs, false, &decode)
+            .unwrap();
+        save(root.path(), "autosave", "other");
+        let list = cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap();
+        assert_eq!(list[0].name, "other");
+        assert_eq!(calls.get(), 2);
+        cache
+            .discover_with_decoder(root.path(), &inputs, false, &decode)
+            .unwrap();
+        fs::remove_file(slot.join("game.sii")).unwrap();
+        assert!(cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap()
+            .is_empty());
+        assert!(cache.names.is_empty());
+    }
+
+    #[test]
+    fn cache_detects_same_timestamp_rewrites_missing_files_and_new_saves() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = save(root.path(), "1", "first");
+        let calls = Cell::new(0);
+        let decode = |_: &Path, bytes: &[u8]| {
+            calls.set(calls.get() + 1);
+            decoder::decode_direct(bytes)
+        };
+        let inputs = DiscoveryInputs::default();
+        let mut cache = SaveListCache::default();
+        cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap();
+        let modified = fs::metadata(dir.join("info.sii"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        save(root.path(), "1", "other");
+        fs::File::options()
+            .write(true)
+            .open(dir.join("info.sii"))
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let list = cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap();
+        assert_eq!(list[0].name, "other");
+        assert_eq!(calls.get(), 2);
+        fs::remove_file(dir.join("info.sii")).unwrap();
+        assert!(cache.discover(root.path(), &inputs, true).unwrap()[0]
+            .error
+            .is_some());
+        save(root.path(), "1", "back");
+        save(root.path(), "2", "new");
+        assert_eq!(cache.discover(root.path(), &inputs, true).unwrap().len(), 2);
+        fs::remove_file(dir.join("game.sii")).unwrap();
+        assert_eq!(cache.discover(root.path(), &inputs, true).unwrap().len(), 1);
+        assert_eq!(cache.names.len(), 1);
+    }
+    #[test]
+    fn racing_decode_is_not_cached() {
+        let root = tempfile::tempdir().unwrap();
+        save(root.path(), "1", "first");
+        let decode = |path: &Path, bytes: &[u8]| {
+            fs::write(path, "changed").unwrap();
+            decoder::decode_direct(bytes)
+        };
+        let mut cache = SaveListCache::default();
+        let list = cache
+            .discover_with_decoder(root.path(), &DiscoveryInputs::default(), true, &decode)
+            .unwrap();
+        assert!(list[0].error.is_some());
+        assert!(cache.names.is_empty());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn locked_info_is_not_hidden_by_warm_cache() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let dir = save(root.path(), "1", "first");
+        let mut cache = SaveListCache::default();
+        let inputs = DiscoveryInputs::default();
+        cache.discover(root.path(), &inputs, true).unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(dir.join("info.sii"))
+            .unwrap();
+        assert!(cache.discover(root.path(), &inputs, true).unwrap()[0]
+            .error
+            .is_some());
+        drop(lock);
+        assert_eq!(
+            cache.discover(root.path(), &inputs, true).unwrap()[0].name,
+            "first"
+        );
+    }
 }

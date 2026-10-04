@@ -1,12 +1,17 @@
 // Fully synthetic saves/catalog for UI checks. No installed game or player data needed.
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import {
+  createSyntheticGame,
+  bindSyntheticCatalog,
+} from "./synthetic-catalog.mjs";
 const root = resolve("verification/garage-ui");
 const game = resolve(root, "game");
 const app = resolve(root, "app");
 const slot = resolve(game, "profiles/fixture/save/1");
 await mkdir(slot, { recursive: true });
 await mkdir(app, { recursive: true });
+const installation = await createSyntheticGame(resolve(root, "installation"));
 const entries = [
   [
     "engine",
@@ -86,10 +91,11 @@ await writeFile(
     archives: [],
   }),
 );
+await bindSyntheticCatalog(resolve(app, "catalog.json"), installation);
 await writeFile(
   resolve(app, "settings.json"),
   JSON.stringify({
-    game: resolve(root, "installation"),
+    game: installation,
     documents: game,
     extractor: "",
     onboarding_version: 1,

@@ -84,6 +84,7 @@ pub fn catalog_path(s: &Settings, data: &Path) -> PathBuf {
 }
 #[derive(Clone, Serialize)]
 pub struct SaveEntry {
+    pub is_autosave: bool,
     pub path: String,
     pub name: String,
     pub profile: String,
@@ -119,9 +120,8 @@ pub fn has_mod_dependencies(info: &str) -> Result<bool> {
 pub struct Session {
     pub path: PathBuf,
     pub original_hash: String,
-    pub info_hash: Option<String>,
+    pub info_hash: String,
     pub doc: Document,
-    pub mods: bool,
 }
 #[derive(Serialize)]
 pub struct Opened {
@@ -132,40 +132,36 @@ pub struct Opened {
 }
 impl Session {
     pub fn open(path: &Path, _s: &Settings) -> Result<Self> {
+        Self::open_with(path, decoder::read)
+    }
+    fn open_with(path: &Path, decode: impl Fn(&Path) -> Result<String>) -> Result<Self> {
         reject_staging(path)?;
-        let raw = std::fs::read(path).map_err(|e| e.to_string())?;
-        let original_hash = hash(&raw);
-        let doc = Document::parse(decoder::read(path)?)?;
-        if hash(&std::fs::read(path).map_err(|e| e.to_string())?) != original_hash {
-            return Err("读取期间存档发生变化，请重试".into());
-        }
+        let original_hash = hash(&decoder::read_bounded(path)?);
+        let doc = Document::parse(decode(path)?)?;
         doc.validate_vehicles()?;
         let info = path.parent().unwrap().join("info.sii");
-        let info_hash = std::fs::read(&info).ok().map(|b| hash(&b));
-        let info_text = if info.exists() {
-            decoder::read(&info)?
-        } else {
-            String::new()
-        };
-        let mods = has_mod_dependencies(&info_text)?;
-        if mods {
+        let info_hash = hash(&decoder::read_bounded(&info)?);
+        let info_text = decode(&info)?;
+        if has_mod_dependencies(&info_text)? {
             return Err(
                 "此存档包含 Mod 或未知扩展依赖，当前版本不支持。请使用原版及官方 DLC 存档。".into(),
             );
+        }
+        if hash(&decoder::read_bounded(path)?) != original_hash {
+            return Err("读取期间存档发生变化，请重试".into());
+        }
+        if hash(&decoder::read_bounded(&info)?) != info_hash {
+            return Err("读取期间存档信息发生变化，请重试".into());
         }
         Ok(Self {
             path: path.into(),
             original_hash,
             info_hash,
             doc,
-            mods,
         })
     }
     pub fn view(&self, c: &Catalog) -> Result<Opened> {
         let mut warnings = Vec::new();
-        if self.mods {
-            warnings.push("此存档声明了 Mod 依赖，当前版本不支持。".into());
-        }
         if c.definitions.is_empty() {
             warnings.push("尚未建立配件目录。所有配件可查看；编辑前请在设置中建立目录。".into());
         }
@@ -180,19 +176,14 @@ impl Session {
         if !ops.is_empty() {
             c.fresh()?;
         }
-        if self.mods && !ops.is_empty() {
-            return Err("当前版本不支持 Mod 存档".into());
-        }
         crate::edit::apply(&self.doc, c, ops)
     }
     pub fn fresh(&self) -> Result<()> {
         if digest(&self.path)? != self.original_hash {
             return Err("源存档已被游戏或其他程序更新，请重新打开后再修改".into());
         }
-        if let Some(h) = &self.info_hash {
-            if &digest(&self.path.parent().unwrap().join("info.sii"))? != h {
-                return Err("存档信息已更新，请重新打开".into());
-            }
+        if digest(&self.path.parent().unwrap().join("info.sii"))? != self.info_hash {
+            return Err("存档信息已更新，请重新打开".into());
         }
         Ok(())
     }
@@ -551,7 +542,7 @@ fn commit_with(
         after_hash: hash(doc.text.as_bytes()),
         changes,
         state: "preparing".into(),
-        info_hash: session.info_hash.clone(),
+        info_hash: Some(session.info_hash.clone()),
         warning: None,
     };
     if let Err(e) = persist(&r) {
@@ -566,7 +557,7 @@ fn commit_with(
         copy_files(source.parent().unwrap(), &backup, &[])?;
         session.fresh()?;
         if digest(&backup.join("game.sii"))? != r.before_hash
-            || session.info_hash.as_ref() != Some(&digest(&backup.join("info.sii"))?)
+            || session.info_hash != digest(&backup.join("info.sii"))?
         {
             return Err("备份校验失败".into());
         }
@@ -681,7 +672,7 @@ pub fn restore(id: &str) -> Result<String> {
     if current != r.after_hash {
         return Err("目标存档已被游戏更新，为避免覆盖进度，不能直接回滚此历史记录".into());
     }
-    let data = std::fs::read(Path::new(&r.backup).join("game.sii")).map_err(|e| e.to_string())?;
+    let data = decoder::read_bounded(&Path::new(&r.backup).join("game.sii"))?;
     if hash(&data) != r.before_hash {
         return Err("备份内容校验失败".into());
     }

@@ -68,6 +68,14 @@ select:focus {
   border-color: #58927a;
   box-shadow: 0 0 0 3px #58927a17;
 }
+select {
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23627859' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px 16px;
+}
 input::placeholder {
   color: #94a298;
 }
@@ -140,13 +148,17 @@ pre {
   margin-top: 3px;
 }
 .brand-icon {
-  width: 43px;
-  height: 43px;
-  background: #d3b878;
-  color: #16362b;
-  border-radius: 11px;
+  width: 54px;
+  height: 58px;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
+}
+.brand-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .rail-label {
   font-size: 10px;
@@ -218,7 +230,26 @@ header {
   align-items: center;
   gap: 12px;
 }
+.header-right {
+  line-height: 1.5;
+}
+.header-right > svg {
+  flex-shrink: 0;
+}
+.header-right > span {
+  white-space: nowrap;
+}
+.header-backup {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.header-backup > svg {
+  flex-shrink: 0;
+}
 .chip {
+  display: inline-flex;
+  align-items: center;
   border: 1px solid #e1e7dd;
   border-radius: 20px;
   padding: 5px 10px;
@@ -260,7 +291,7 @@ header {
 .savebar > select {
   flex: 1;
   border: 0;
-  background: #f4f6f2;
+  background-color: #f4f6f2;
 }
 .savebar details {
   position: relative;
@@ -408,7 +439,7 @@ header {
 .filters select {
   font-size: 11px;
   width: 102px;
-  padding: 8px;
+  padding: 8px 36px 8px 8px;
 }
 .part-list {
   max-height: 570px;
@@ -572,7 +603,6 @@ header {
   box-shadow: 0 1px 4px #163c2514;
 }
 .candidates {
-  max-height: 220px;
   overflow: auto;
   margin: 10px 0;
 }
@@ -993,4 +1023,32 @@ footer {
 }
 .onboarding .button-row {
   justify-content: flex-end;
+}
+.onboarding-path {
+  display: block;
+  position: relative;
+  margin-top: 8px;
+}
+.onboarding-path input {
+  margin-top: 0;
+  padding-right: 52px;
+}
+.onboarding-path .path-options {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 40px;
+  height: calc(100% - 2px);
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  background-color: #fff;
+  color: transparent;
+  cursor: pointer;
+}
+.onboarding-path .path-options option {
+  color: #253b32;
+  background: #fff;
 }

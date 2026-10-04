@@ -27,3 +27,10 @@ https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution
 ## Application dependencies
 
 The application also uses Tauri, React, TypeScript, Vite, Lucide, and Rust crates listed in Cargo.lock. Their dependency versions are locked in the source repository. The packaging workflow generates `licenses/dependencies/DEPENDENCIES.md`, `inventory.json`, and collected license texts in every release archive.
+
+
+## Locale archive path hashing
+
+The read-only game text reader uses the 2011 CityHash variant from the MIT-licensed [scs_tools cityhash module](https://github.com/Wilps93/scs_tools/blob/e147e755778579e78f80a406a53c64515113d7a1/src/cityhash.rs), pinned to commit `e147e755778579e78f80a406a53c64515113d7a1`. The scs_tools and underlying Google notices are included in `licenses/locale-cityhash-MIT.txt` and every release package. Archive metadata reading is implemented locally from documented format information.
+
+ETS2 localized text is read from the user's installed game and cached locally for display. No game localization database or other game assets are included in the application download.

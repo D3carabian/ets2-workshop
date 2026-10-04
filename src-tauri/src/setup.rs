@@ -114,13 +114,7 @@ fn acquire_extractor(
     unpack: impl FnOnce(&[u8]) -> Result<Vec<u8>>,
     progress: &dyn Fn(&str),
 ) -> Result<PathBuf> {
-    // Bound cached reads too; an invalid or replaced file must never be executed.
-    let cached = std::fs::File::open(target).and_then(|f| {
-        let mut b = Vec::new();
-        f.take(4 * 1024 * 1024 + 1).read_to_end(&mut b)?;
-        Ok(b)
-    });
-    if cached.is_ok_and(|b| b.len() <= 4 * 1024 * 1024 && hash(&b) == exe_sha) {
+    if validate_extractor_hash(target, exe_sha).is_ok() {
         progress("解包工具已就绪");
         return Ok(target.into());
     }
@@ -133,6 +127,21 @@ fn acquire_extractor(
     })?;
     progress("官方解包工具已下载并通过校验");
     Ok(target.into())
+}
+fn validate_extractor_hash(path: &Path, expected: &str) -> Result<()> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|e| e.to_string())?
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > 4 * 1024 * 1024 || hash(&bytes) != expected {
+        return Err("解包工具校验失败，未执行。请重新准备官方工具".into());
+    }
+    Ok(())
+}
+pub fn validate_extractor(path: &Path) -> Result<()> {
+    validate_extractor_hash(path, EXE_SHA)
 }
 pub fn ensure_extractor(progress: &dyn Fn(&str)) -> Result<PathBuf> {
     acquire_extractor(
@@ -148,28 +157,40 @@ pub fn prepare(
     s: Settings,
     progress: &dyn Fn(&str),
 ) -> Result<(Settings, crate::catalog::Catalog)> {
-    prepare_with(
-        s,
-        &app_dir(),
-        progress,
-        || ensure_extractor(progress),
-        crate::catalog::build,
-    )
+    prepare_with(s, &app_dir(), progress, |s| {
+        crate::catalog::build_lazy(Path::new(&s.game), &app_dir(), progress, &|| {
+            ensure_extractor(progress)
+        })
+    })
 }
 fn prepare_with(
     mut s: Settings,
     data: &Path,
     progress: &dyn Fn(&str),
-    extractor: impl FnOnce() -> Result<PathBuf>,
-    build: impl FnOnce(&Path, &Path, &Path) -> Result<crate::catalog::Catalog>,
+    build: impl FnOnce(&Settings) -> Result<crate::catalog::Catalog>,
 ) -> Result<(Settings, crate::catalog::Catalog)> {
     progress("正在检查游戏和存档目录…");
     validate(&s)?;
-    s.extractor = extractor()?.to_string_lossy().into();
-    progress("正在建立配件目录，首次解包可能需要数分钟…");
-    let c = build(Path::new(&s.game), Path::new(&s.extractor), data).map_err(|e| {
+    progress("正在建立配件目录…");
+    let c = build(&s).map_err(|e| {
         format!("配件目录准备失败：{e}。请检查游戏文件、缓存目录权限和剩余空间后重试。")
     })?;
+    s.extractor = managed_extractor().to_string_lossy().into();
+    let s = publish_catalog(s, &c, data)?;
+    Ok((s, c))
+}
+
+/// Publish a complete catalog generation before changing the settings pointer.
+/// All configuration and catalog update entry points share this transaction.
+pub fn publish_catalog(s: Settings, c: &crate::catalog::Catalog, data: &Path) -> Result<Settings> {
+    publish_with(s, c, data, &write_atomic)
+}
+fn publish_with(
+    mut s: Settings,
+    c: &crate::catalog::Catalog,
+    data: &Path,
+    write: &dyn Fn(&Path, &[u8]) -> Result<()>,
+) -> Result<Settings> {
     if c.definitions.is_empty() {
         return Err("未发现配件定义，请检查游戏目录后重试。".into());
     }
@@ -181,10 +202,10 @@ fn prepare_with(
     // Commit the settings pointer last: failed reconfiguration preserves the old catalog too.
     s.catalog_file = format!("catalog-{}.json", uuid::Uuid::new_v4().simple());
     let catalog_path = data.join(&s.catalog_file);
-    write_atomic(&catalog_path, &serde_json::to_vec(&c).unwrap())
+    write(&catalog_path, &serde_json::to_vec(&c).unwrap())
         .map_err(|e| format!("无法保存配件目录：{e}。请检查目录权限和剩余空间后重试。"))?;
     s.onboarding_version = SETUP_VERSION;
-    if let Err(e) = write_atomic(
+    if let Err(e) = write(
         &data.join("settings.json"),
         &serde_json::to_vec_pretty(&s).unwrap(),
     ) {
@@ -203,7 +224,7 @@ fn prepare_with(
             let _ = std::fs::remove_file(old_path);
         }
     }
-    Ok((s, c))
+    Ok(s)
 }
 pub fn validate(s: &Settings) -> Result<()> {
     let game = Path::new(&s.game);
@@ -331,6 +352,10 @@ mod failure_tests {
         let s: Settings =
             serde_json::from_value(serde_json::json!({"game":game,"documents":documents})).unwrap();
         let d = Definition {
+            raw_name: String::new(),
+            names: std::collections::BTreeMap::new(),
+            category_names: std::collections::BTreeMap::new(),
+            name_alias: None,
             path: "/def/vehicle/truck/test/engine/test.sii".into(),
             kind: "accessory_engine_data".into(),
             unit: "test".into(),
@@ -356,15 +381,7 @@ mod failure_tests {
         let dir = sandbox();
         let data = dir.path().join("app");
         let (s, catalog) = fixture(dir.path());
-        let prepare = |s: Settings, c: Result<Catalog>| {
-            prepare_with(
-                s,
-                &data,
-                &|_| {},
-                || Ok(dir.path().join("extractor")),
-                |_, _, _| c,
-            )
-        };
+        let prepare = |s: Settings, c: Result<Catalog>| prepare_with(s, &data, &|_| {}, |_| c);
         assert!(!data.exists()); // discovery/validation require no persistence
         assert!(prepare(s.clone(), Err("extraction failed".into())).is_err());
         assert!(!data.join("settings.json").exists());
@@ -391,21 +408,38 @@ mod failure_tests {
         prepare(s, Ok(catalog)).unwrap();
     }
     #[test]
+    fn failed_catalog_generation_keeps_previous_active_files() {
+        let dir = sandbox();
+        let data = dir.path().join("app");
+        let (s, c) = fixture(dir.path());
+        let published = publish_catalog(s.clone(), &c, &data).unwrap();
+        let settings_bytes = std::fs::read(data.join("settings.json")).unwrap();
+        let catalog_path = storage::catalog_path(&published, &data);
+        let catalog_bytes = std::fs::read(&catalog_path).unwrap();
+        assert!(publish_with(s, &c, &data, &|path, _| {
+            assert!(path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("catalog-"));
+            Err("simulated catalog write failure".into())
+        })
+        .is_err());
+        assert_eq!(
+            std::fs::read(data.join("settings.json")).unwrap(),
+            settings_bytes
+        );
+        assert_eq!(std::fs::read(catalog_path).unwrap(), catalog_bytes);
+        assert_eq!(std::fs::read_dir(data).unwrap().count(), 2);
+    }
+    #[test]
     #[cfg(windows)]
     fn locked_settings_preserve_previous_configuration_and_allow_retry() {
         use std::os::windows::fs::OpenOptionsExt;
         let dir = sandbox();
         let data = dir.path().join("app");
         let (s, c) = fixture(dir.path());
-        let prepare = || {
-            prepare_with(
-                s.clone(),
-                &data,
-                &|_| {},
-                || Ok(dir.path().join("extractor")),
-                |_, _, _| Ok(c.clone()),
-            )
-        };
+        let prepare = || prepare_with(s.clone(), &data, &|_| {}, |_| Ok(c.clone()));
         prepare().unwrap();
         let path = data.join("settings.json");
         let previous = std::fs::read(&path).unwrap();

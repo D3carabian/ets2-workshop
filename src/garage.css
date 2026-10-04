@@ -1,6 +1,6 @@
 /* Keep scrolling local to each working area, including at the minimum window size. */
 .workspace .garage-grid {
-  height: max(380px, calc(100dvh - 320px));
+  height: var(--garage-height, max(240px, calc(100dvh - 320px)));
   align-items: stretch;
 }
 .garage-grid > * {
@@ -14,8 +14,22 @@
   scrollbar-gutter: stable;
 }
 .garage-grid .fleet > .section-head {
+  align-items: baseline;
   background: #f3f5f2;
   margin-bottom: 8px;
+}
+.garage-grid .fleet > .section-head > span {
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.garage-grid .inspector {
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  max-height: 100%;
+}
+.garage-grid .inspector > * {
+  flex-shrink: 0;
 }
 .garage-grid .parts-panel {
   display: flex;
@@ -104,7 +118,16 @@
   color: #235a43;
 }
 .garage-grid .candidates {
+  flex: 0 1 auto;
+  min-height: 0;
   overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+.garage-grid .candidates:has(.candidate:nth-child(2)) {
+  min-height: 140px;
+}
+.garage-grid .candidates:not(:has(.candidate:nth-child(2))) {
+  flex-shrink: 0;
 }
 
 .garage-grid .fleet {
@@ -135,4 +158,108 @@
 .garage-grid .fleet > .button-row button {
   padding: 7px 3px;
   font-size: 11px;
+}
+
+.catalog-filters {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin: 0 0 16px;
+}
+.catalog-filters p {
+  margin: 0;
+  font-size: 12px;
+}
+.catalog-pagination,
+.candidate-pagination {
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+label.save-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+label.save-filter input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.save-filter span {
+  opacity: 0.65;
+}
+.opened-save {
+  margin: 6px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.backup-reminder {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  color: #537160;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.backup-reminder > svg,
+.backup-status > svg {
+  flex-shrink: 0;
+}
+.section-head > .backup-reminder {
+  margin: 0;
+  line-height: 1.6;
+}
+.backup-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border: 1px solid #ceddcc;
+  border-radius: 10px;
+  background: #edf4e9;
+  color: #3c6247;
+}
+.backup-status-copy {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 180px;
+}
+.backup-status-copy span {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #627859;
+}
+.history-backup-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #3c6247;
+  margin: 12px 0;
+}
+.history-verification,
+.history-tools {
+  border-top: 1px solid #e7ecdf;
+  padding-top: 12px;
+  margin-top: 14px;
+}
+.history-verification > summary,
+.history-tools > summary {
+  font-size: 12px;
+}
+.history-verification > p,
+.history-tools > button {
+  margin-top: 12px;
+}
+.history-verification > section {
+  margin-top: 18px;
 }

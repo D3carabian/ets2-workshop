@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use workshop_core::{
-    discovery::{self, DiscoveryInputs},
+    discovery::{self, DiscoveryInputs, SaveListCache},
     setup,
     storage::{self, Settings},
 };
@@ -232,10 +232,31 @@ fn empty_inputs_are_isolated_and_missing_optional_roots_are_normal() {
 fn invalid_roots_and_unreadable_configuration_report_actionable_errors() {
     let temp = sandbox();
     file(temp.path(), "profiles", "not a directory");
-    let error = discovery::discover(temp.path(), &DiscoveryInputs::default())
-        .err()
+    save(
+        &temp.path().join("steam_profiles"),
+        "usable",
+        "1",
+        "available",
+    );
+    let mut cache = SaveListCache::default();
+    let saves = cache
+        .discover(temp.path(), &DiscoveryInputs::default(), true)
         .unwrap();
-    assert!(error.contains("profiles") && error.contains("读取权限后重试"));
+    assert_eq!(saves.len(), 1);
+    assert!(cache
+        .warnings()
+        .iter()
+        .any(|error| error.contains("profiles") && error.contains("读取权限后重试")));
+    fs::remove_file(temp.path().join("profiles")).unwrap();
+    save(&temp.path().join("profiles"), "repaired", "1", "recovered");
+    assert_eq!(
+        cache
+            .discover(temp.path(), &DiscoveryInputs::default(), true)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(cache.warnings().is_empty());
     let steam = temp.path().join("Steam");
     file(
         &steam,
@@ -287,25 +308,39 @@ fn locked_info_reports_error_instead_of_hiding_the_slot() {
 
 #[cfg(windows)]
 #[test]
-fn unreadable_profile_directory_fails_instead_of_returning_an_empty_garage() {
+fn unreadable_profile_directory_does_not_hide_other_saves_and_recovers() {
     use std::os::windows::fs::OpenOptionsExt;
     let temp = sandbox();
     let profiles = temp.path().join("profiles");
     save(&profiles, "profile", "1", "test");
-    let _lock = fs::OpenOptions::new()
+    save(
+        &temp.path().join("steam_profiles"),
+        "other",
+        "1",
+        "available",
+    );
+    let lock = fs::OpenOptions::new()
         .read(true)
         .share_mode(0)
         .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS allows a directory handle.
         .open(&profiles)
         .unwrap();
-    let error = discovery::discover(temp.path(), &DiscoveryInputs::default())
-        .err()
-        .expect("a blocked directory must not become an empty success");
-    assert!(error.contains("profiles") && error.contains("读取权限后重试"));
+    let mut cache = SaveListCache::default();
+    let inputs = DiscoveryInputs::default();
+    let saves = cache.discover(temp.path(), &inputs, true).unwrap();
+    assert_eq!(saves.len(), 1);
+    assert_eq!(saves[0].name, "available");
+    assert!(cache
+        .warnings()
+        .iter()
+        .any(|error| error.contains("profiles") && error.contains("读取权限后重试")));
+    drop(lock);
+    assert_eq!(cache.discover(temp.path(), &inputs, true).unwrap().len(), 2);
+    assert!(cache.warnings().is_empty());
 }
 
 #[test]
-fn setup_rejects_file_in_place_of_profiles_and_allows_retry_after_repair() {
+fn setup_checks_selected_root_without_rejecting_unusable_profile_branches() {
     let temp = sandbox();
     let docs = temp.path().join("documents");
     let game = temp.path().join("game");
@@ -315,8 +350,12 @@ fn setup_rejects_file_in_place_of_profiles_and_allows_retry_after_repair() {
     selected.game = game.to_string_lossy().into();
     for name in ["profiles", "steam_profiles"] {
         let invalid = file(&docs, name, "not a directory");
-        let error = setup::validate(&selected).unwrap_err();
-        assert!(error.contains(name) && error.contains("读取权限后重试"));
+        setup::validate(&selected).unwrap();
+        let mut cache = SaveListCache::default();
+        cache
+            .discover(&docs, &DiscoveryInputs::default(), true)
+            .unwrap();
+        assert!(cache.warnings().iter().any(|error| error.contains(name)));
         fs::remove_file(&invalid).unwrap();
         fs::create_dir(&invalid).unwrap();
         setup::validate(&selected).unwrap();
@@ -328,7 +367,7 @@ fn setup_rejects_file_in_place_of_profiles_and_allows_retry_after_repair() {
 
 #[cfg(windows)]
 #[test]
-fn setup_rejects_locked_selected_tree_at_every_level_and_retry_succeeds() {
+fn setup_accepts_local_failures_but_rejects_a_locked_selected_root() {
     use std::os::windows::fs::OpenOptionsExt;
     let temp = sandbox();
     let docs = temp.path().join("documents");
@@ -336,6 +375,7 @@ fn setup_rejects_locked_selected_tree_at_every_level_and_retry_succeeds() {
     file(&game, "def.scs", "synthetic");
     file(&game, "bin/win_x64/eurotrucks2.exe", "synthetic");
     save(&docs.join("profiles"), "profile", "1", "synthetic");
+    save(&docs.join("steam_profiles"), "other", "1", "available");
     let mut selected = settings(&docs);
     selected.game = game.to_string_lossy().into();
     for relative in [
@@ -350,11 +390,109 @@ fn setup_rejects_locked_selected_tree_at_every_level_and_retry_succeeds() {
             .custom_flags(0x02000000)
             .open(docs.join(relative))
             .unwrap();
+        setup::validate(&selected).unwrap();
+        let mut cache = SaveListCache::default();
+        let saves = cache
+            .discover(&docs, &DiscoveryInputs::default(), true)
+            .unwrap();
+        assert_eq!(saves.len(), 1, "locked {relative} hid a usable branch");
+        assert_eq!(saves[0].name, "available");
         assert!(
-            setup::validate(&selected).is_err(),
-            "locked {relative} was accepted"
+            !cache.warnings().is_empty(),
+            "locked {relative} was silently ignored"
         );
         drop(lock);
         setup::validate(&selected).unwrap();
+        assert_eq!(
+            cache
+                .discover(&docs, &DiscoveryInputs::default(), true)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(cache.warnings().is_empty());
     }
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .custom_flags(0x02000000)
+        .open(&docs)
+        .unwrap();
+    assert!(setup::validate(&selected).is_err());
+    assert!(discovery::discover(&docs, &DiscoveryInputs::default()).is_err());
+    drop(lock);
+    setup::validate(&selected).unwrap();
+}
+
+#[test]
+fn broken_automatic_steam_sources_do_not_block_selected_saves() {
+    let temp = sandbox();
+    let docs = temp.path().join("documents");
+    save(&docs.join("profiles"), "local", "1", "available");
+    let steam = temp.path().join("Steam");
+    let broken = file(&steam, "userdata", "not a directory");
+    let inputs = DiscoveryInputs {
+        steam_roots: vec![steam.clone(), temp.path().join("missing-steam")],
+        ..Default::default()
+    };
+    let mut cache = SaveListCache::default();
+    assert_eq!(cache.discover(&docs, &inputs, true).unwrap().len(), 1);
+    assert_eq!(cache.warnings().len(), 1);
+    assert!(cache.warnings()[0].contains("userdata"));
+    fs::remove_file(broken).unwrap();
+    let cloud = steam.join("userdata/1/227300/remote");
+    file(&cloud, "profiles", "not a directory");
+    assert_eq!(cache.discover(&docs, &inputs, true).unwrap().len(), 1);
+    assert_eq!(cache.warnings().len(), 1);
+    assert!(cache.warnings()[0].contains("remote/profiles"));
+    fs::remove_file(cloud.join("profiles")).unwrap();
+    save(&cloud.join("profiles"), "cloud", "1", "recovered");
+    assert_eq!(cache.discover(&docs, &inputs, true).unwrap().len(), 2);
+    assert!(cache.warnings().is_empty());
+}
+
+#[test]
+fn unusable_selected_root_still_fails_even_when_automatic_sources_are_valid() {
+    let temp = sandbox();
+    let steam = temp.path().join("Steam");
+    save(
+        &steam.join("userdata/1/227300/remote/profiles"),
+        "cloud",
+        "1",
+        "available",
+    );
+    let inputs = DiscoveryInputs {
+        steam_roots: vec![steam],
+        ..Default::default()
+    };
+    let selected_file = file(temp.path(), "selected-file", "not a directory");
+    let mut cache = SaveListCache::default();
+    for selected in [selected_file, temp.path().join("missing")] {
+        assert!(cache.discover(&selected, &inputs, true).is_err());
+        assert!(discovery::validate_documents(&selected).is_err());
+    }
+}
+
+#[test]
+fn broken_profile_and_slot_are_local_failures_and_warnings_clear_after_repair() {
+    let temp = sandbox();
+    let profiles = temp.path().join("profiles");
+    save(&profiles, "good", "1", "available");
+    let broken_profile = file(&profiles, "broken/save", "not a directory");
+    let broken_slot = profiles.join("good/save/2/game.sii");
+    fs::create_dir_all(&broken_slot).unwrap();
+    let inputs = DiscoveryInputs::default();
+    let mut cache = SaveListCache::default();
+    let saves = cache.discover(temp.path(), &inputs, true).unwrap();
+    assert_eq!(saves.len(), 1);
+    assert_eq!(saves[0].name, "available");
+    assert_eq!(cache.warnings().len(), 2);
+    assert!(cache.warnings().iter().any(|s| s.contains("broken/save")));
+    assert!(cache.warnings().iter().any(|s| s.contains("2/game.sii")));
+    fs::remove_file(broken_profile).unwrap();
+    fs::remove_dir(broken_slot).unwrap();
+    save(&profiles, "broken", "1", "recovered profile");
+    save(&profiles, "good", "2", "recovered slot");
+    assert_eq!(cache.discover(temp.path(), &inputs, true).unwrap().len(), 3);
+    assert!(cache.warnings().is_empty());
 }

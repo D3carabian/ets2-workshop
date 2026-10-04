@@ -1,5 +1,9 @@
 // Synthetic-only desktop test. Build with --features custom-protocol first.
 import { chromium } from "playwright";
+import {
+  bindSyntheticCatalog,
+  createSyntheticGame,
+} from "./synthetic-catalog.mjs";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { resolve, join } from "node:path";
@@ -11,6 +15,7 @@ await mkdir(workspace, { recursive: true });
 const root = await mkdtemp(join(workspace, "phase3-ui-"));
 assert(root.startsWith(workspace + "\\") || root.startsWith(workspace + "/"));
 const app = join(root, "app");
+const installation = await createSyntheticGame(join(root, "installation"));
 const documents = join(root, "game");
 const slot = join(documents, "profiles/fixture/save/1");
 await mkdir(slot, { recursive: true });
@@ -54,7 +59,7 @@ await writeFile(
   join(app, "settings.json"),
   JSON.stringify({
     documents,
-    game: root,
+    game: installation,
     extractor: "",
     onboarding_version: 1,
   }),
@@ -68,6 +73,7 @@ await writeFile(
     archives: [],
   }),
 );
+await bindSyntheticCatalog(join(app, "catalog.json"), installation);
 const port = 9238;
 const proc = spawn(resolve("src-tauri/target/debug/ets2-workshop.exe"), [], {
   windowsHide: true,
@@ -75,6 +81,7 @@ const proc = spawn(resolve("src-tauri/target/debug/ets2-workshop.exe"), [], {
   env: {
     ...process.env,
     ETS2_WORKSHOP_DATA_DIR: app,
+    WEBVIEW2_USER_DATA_FOLDER: join(root, "webview"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
   },
 });
@@ -165,12 +172,18 @@ try {
     join(app, "history", r.id, "receipt.json"),
     JSON.stringify({ ...r, state: "prepared" }),
   );
-  await page.locator(".nav").filter({ hasText: "改装记录" }).click();
+  await page.locator(".nav").filter({ hasText: "备份与恢复" }).click();
   await page.getByRole("button", { name: "刷新", exact: true }).click();
-  await page.getByText(/写入未确认或已中断/).waitFor();
+  await page.getByText(/保存未完成或写入未确认/).waitFor();
+  assert.equal(
+    await page.locator(".history-backup-status").count(),
+    0,
+    "Unconfirmed receipts must not claim completed backups",
+  );
+  await page.locator(".history-tools summary").click();
   await page.getByRole("button", { name: "清理临时文件", exact: true }).click();
   await page.locator(".notice.success").filter({ hasText: "已清理" }).waitFor();
-  await page.getByRole("button", { name: "恢复修改前", exact: true }).click();
+  await page.getByRole("button", { name: "恢复此备份", exact: true }).click();
   assert.match(await page.locator(".modal").innerText(), /不删除存档槽/);
   await page
     .locator(".modal")

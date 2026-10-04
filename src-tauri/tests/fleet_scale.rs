@@ -34,6 +34,10 @@ fn fleet(count: usize) -> (Document, Catalog) {
         catalog.definitions.insert(
             path.clone(),
             Definition {
+                raw_name: String::new(),
+                names: std::collections::BTreeMap::new(),
+                category_names: std::collections::BTreeMap::new(),
+                name_alias: None,
                 path,
                 kind: kind.into(),
                 unit: format!("{name}.{MODEL}.{category}"),
@@ -212,4 +216,70 @@ fn later_operation_can_use_a_newly_added_accessory_as_donor() {
         serde_json::to_value(&preview.trucks).unwrap(),
         serde_json::to_value(garage::inventory(&out, &catalog).unwrap()).unwrap()
     );
+}
+
+#[test]
+fn removing_unrelated_operation_keeps_added_accessory_identity() {
+    let (doc, catalog) = fleet(3);
+    let engine = Operation {
+        truck_id: "truck0".into(),
+        action: "replace".into(),
+        accessory_id: Some("engine0".into()),
+        candidate_path: path("engine", "b"),
+        donor_accessory: None,
+    };
+    let add = Operation {
+        truck_id: "truck0".into(),
+        action: "add".into(),
+        accessory_id: None,
+        candidate_path: path("beacon", "a"),
+        donor_accessory: Some("beacon2".into()),
+    };
+    let (_, initial) = edit::apply(&doc, &catalog, &[engine.clone(), add.clone()]).unwrap();
+    let id = initial.trucks[0].accessories[3].id.clone();
+    let change = Operation {
+        truck_id: "truck0".into(),
+        action: "replace".into(),
+        accessory_id: Some(id.clone()),
+        candidate_path: path("beacon", "b"),
+        donor_accessory: None,
+    };
+    edit::apply(&doc, &catalog, &[engine, add.clone(), change.clone()]).unwrap();
+    let (_, after_undo) = edit::apply(&doc, &catalog, &[add, change.clone()]).unwrap();
+    assert_eq!(after_undo.trucks[0].accessories[3].id, id);
+    assert_eq!(
+        after_undo.trucks[0].accessories[3].path,
+        path("beacon", "b")
+    );
+    assert_eq!(
+        after_undo.trucks[0].accessories[0].path,
+        path("engine", "a")
+    );
+    assert!(edit::apply(&doc, &catalog, &[change])
+        .unwrap_err()
+        .contains("追加操作"));
+}
+
+#[test]
+fn operation_shape_is_validated_before_editing() {
+    let (doc, catalog) = fleet(3);
+    let mut op = Operation {
+        truck_id: "truck0".into(),
+        action: "add".into(),
+        accessory_id: Some("engine0".into()),
+        candidate_path: path("beacon", "a"),
+        donor_accessory: Some("beacon2".into()),
+    };
+    assert!(edit::apply(&doc, &catalog, &[op.clone()])
+        .unwrap_err()
+        .contains("同时指定"));
+    op.action = "replace".into();
+    op.accessory_id = None;
+    assert!(edit::apply(&doc, &catalog, &[op.clone()])
+        .unwrap_err()
+        .contains("未选择"));
+    op.action = "unknown".into();
+    assert!(edit::apply(&doc, &catalog, &[op])
+        .unwrap_err()
+        .contains("未知操作"));
 }

@@ -28,6 +28,10 @@ fn fixture() -> (Document, Catalog) {
         c.definitions.insert(
             path.clone(),
             Definition {
+                raw_name: String::new(),
+                names: std::collections::BTreeMap::new(),
+                category_names: std::collections::BTreeMap::new(),
+                name_alias: None,
                 path,
                 kind: kind.into(),
                 unit: format!("{file}.{model}.{cat}"),
@@ -120,6 +124,7 @@ fn duplicate_core_rejected() {
     for cat in ["engine", "chassis", "tank"] {
         let mut op = replace();
         op.action = "add".into();
+        op.accessory_id = None;
         op.candidate_path = c
             .definitions
             .values()
@@ -248,7 +253,26 @@ fn wheel_verification_uses_axle_offset_not_any_matching_tire() {
 fn backup_new_slot_restore_and_concurrent_save() {
     let temp = tempfile::tempdir().unwrap();
     std::env::set_var("ETS2_WORKSHOP_DATA_DIR", temp.path().join("app"));
-    let (d, c) = fixture();
+    let (d, mut c) = fixture();
+    let game = temp.path().join("synthetic-game");
+    std::fs::create_dir_all(&game).unwrap();
+    let pack = game.join("def.scs");
+    std::fs::write(&pack, b"synthetic game identity").unwrap();
+    c.parser_version = workshop_core::catalog::BUILD_CACHE_VERSION;
+    c.game_path = game.canonicalize().unwrap().to_string_lossy().into();
+    c.source_fingerprint = workshop_core::catalog::current_source_fingerprint(&game).unwrap();
+    c.scan_complete = true;
+    let meta = std::fs::metadata(&pack).unwrap();
+    c.archives = vec![(
+        pack.to_string_lossy().into(),
+        meta.len(),
+        meta.modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )];
+    c.fresh().unwrap();
     let root = temp.path().join("save");
     let slot = root.join("1");
     std::fs::create_dir_all(&slot).unwrap();

@@ -1,3 +1,4 @@
+import { LanguagePicker, SourceMessage, useLanguage } from "./i18n";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -25,6 +26,7 @@ export default function Onboarding({
   onComplete: (settings: Settings, count: number) => Promise<void>;
   onClose?: () => void;
 }) {
+  const { t: tr } = useLanguage();
   const [value, setValue] = useState(initial);
   const [detected, setDetected] = useState<Detection | null>(null);
   const [busy, setBusy] = useState(true);
@@ -95,96 +97,108 @@ export default function Onboarding({
         className="onboarding"
         role="dialog"
         aria-modal="true"
-        aria-label="首次启动向导"
+        aria-label={tr("首次启动向导")}
       >
+        <LanguagePicker />
         <div className="welcome-icon">
           <FolderSearch size={38} />
         </div>
         <div className="eyebrow">WELCOME TO ETS2 WORKSHOP</div>
-        <h1>确认位置，即可开始改装。</h1>
+        <h1>{tr("确认位置，即可开始改装。")}</h1>
         <p>
-          存档解码器已经内置。请选择本机的游戏和用户数据目录，工具会自动完成其余准备。
+          {tr(
+            "存档解码器已经内置。请选择本机的游戏和用户数据目录，工具会自动完成其余准备。",
+          )}
         </p>
         <div className="wizard-steps">
-          <span className="active">1 检测路径</span>
+          <span className="active">{tr("1 检测路径")}</span>
           <ArrowRight size={15} />
-          <span>2 确认并准备</span>
+          <span>{tr("2 确认并准备")}</span>
           <ArrowRight size={15} />
-          <span>3 打开车库</span>
+          <span>{tr("3 打开车库")}</span>
         </div>
         <fieldset disabled={busy}>
-          <label>
-            游戏安装目录
-            <input
-              list="detected-games"
-              value={value.game}
-              onChange={(e) => setValue({ ...value, game: e.target.value })}
-              placeholder="包含 def.scs 的 Euro Truck Simulator 2 文件夹"
-            />
-            <datalist id="detected-games">
-              {detected?.games.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-            <small>
-              已检测到 {detected?.games.length || 0} 个安装位置，可手动修改。
-            </small>
-            {(detected?.games.length || 0) > 1 && (
-              <select
-                aria-label="选择游戏安装位置"
-                value={detected?.games.includes(value.game) ? value.game : ""}
+          <label htmlFor="game-directory">
+            {tr("游戏安装目录")}
+            <span className="onboarding-path">
+              <input
+                id="game-directory"
+                aria-label={tr("游戏安装目录")}
+                value={value.game}
                 onChange={(e) => setValue({ ...value, game: e.target.value })}
-              >
-                <option value="">检测到多个安装位置，请选择或手动填写</option>
-                {detected?.games.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                placeholder={tr(
+                  "包含 def.scs 的 Euro Truck Simulator 2 文件夹",
+                )}
+              />
+              {!!detected?.games.length && (
+                <select
+                  className="path-options"
+                  aria-label={tr("选择游戏安装位置")}
+                  value={detected.games.includes(value.game) ? value.game : ""}
+                  onChange={(e) => {
+                    if (e.target.value)
+                      setValue({ ...value, game: e.target.value });
+                  }}
+                >
+                  <option value="" disabled>
+                    {tr("选择检测到的位置")}
                   </option>
-                ))}
-              </select>
-            )}
-          </label>
-          <label>
-            ETS2 用户数据目录
-            <input
-              list="detected-docs"
-              value={value.documents}
-              onChange={(e) =>
-                setValue({ ...value, documents: e.target.value })
-              }
-              placeholder="通常为文档中的 Euro Truck Simulator 2 文件夹"
-            />
-            <datalist id="detected-docs">
-              {detected?.documents.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
+                  {detected.games.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </span>
             <small>
-              包含 profiles、steam_profiles 或
-              config.cfg，通常与游戏安装目录不同。
+              {tr("已检测到")}
+              {detected?.games.length || 0}
+              {tr("个安装位置，可手动修改。")}
             </small>
-            {(detected?.documents.length || 0) > 1 && (
-              <select
-                aria-label="选择用户数据位置"
-                value={
-                  detected?.documents.includes(value.documents)
-                    ? value.documents
-                    : ""
-                }
+          </label>
+          <label htmlFor="documents-directory">
+            {tr("ETS2 用户数据目录")}
+            <span className="onboarding-path">
+              <input
+                id="documents-directory"
+                aria-label={tr("ETS2 用户数据目录")}
+                value={value.documents}
                 onChange={(e) =>
                   setValue({ ...value, documents: e.target.value })
                 }
-              >
-                <option value="">
-                  检测到多个用户数据位置，请选择或手动填写
-                </option>
-                {detected?.documents.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                placeholder={tr("通常为文档中的 Euro Truck Simulator 2 文件夹")}
+              />
+              {!!detected?.documents.length && (
+                <select
+                  className="path-options"
+                  aria-label={tr("选择用户数据位置")}
+                  value={
+                    detected.documents.includes(value.documents)
+                      ? value.documents
+                      : ""
+                  }
+                  onChange={(e) => {
+                    if (e.target.value)
+                      setValue({ ...value, documents: e.target.value });
+                  }}
+                >
+                  <option value="" disabled>
+                    {tr("选择检测到的位置")}
                   </option>
-                ))}
-              </select>
-            )}
+                  {detected.documents.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </span>
+            <small>
+              {tr(
+                "包含 profiles、steam_profiles 或 config.cfg，通常与游戏安装目录不同。",
+              )}
+            </small>
           </label>
           {detected?.notes.map((note) => (
             <p className="detection-note" key={note}>
@@ -194,46 +208,48 @@ export default function Onboarding({
           <div className="wizard-facts">
             <span>
               <Check size={16} />
-              内置存档解码器，无需 Truck Tools
+              {tr("内置存档解码器，无需 Truck Tools")}
             </span>
             <span>
               <Check size={16} />
-              自动从 SCS 官方获取解包工具并校验
+              {tr("需要解包时，自动从 SCS 官方获取工具并校验")}
             </span>
             <span>
               <Check size={16} />
-              确认前不修改设置或游戏存档
+              {tr("确认前不修改设置或游戏存档")}
             </span>
           </div>
           <p className="inline-warning">
             <CircleAlert size={16} />
-            仅支持原版及官方 DLC，不支持 Mod
-            存档。首次准备需要网络及用于解包缓存的磁盘空间。
+            {tr(
+              "仅支持原版及官方 DLC，不支持 Mod 存档。直接读取不需要下载工具；遇到需要解包的归档时，请保持联网并预留磁盘空间。",
+            )}
           </p>
           {error && (
             <p role="alert" className="notice error">
-              {error}
+              {<SourceMessage text={error} error />}
             </p>
           )}
           <div className="button-row">
             <button onClick={detect}>
               <RefreshCw size={16} />
-              重新检测
+              {tr("重新检测")}
             </button>
-            {onClose && <button onClick={onClose}>取消</button>}
+            {onClose && <button onClick={onClose}>{tr("取消")}</button>}
             <button
               className="primary"
               disabled={!value.game || !value.documents}
               onClick={finish}
             >
-              确认路径并准备 <ArrowRight size={16} />
+              {tr("确认路径并准备")}
+              <ArrowRight size={16} />
             </button>
           </div>
         </fieldset>
         {busy && (
           <div className="wizard-progress" role="status">
             <LoaderCircle className="spin" size={18} />
-            {progress}
+            {<SourceMessage text={progress} progress />}
           </div>
         )}
       </section>

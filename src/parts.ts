@@ -1,13 +1,14 @@
 import type { Accessory, Definition } from "./types";
+import { translate } from "./i18n-core";
 
 // Display metadata only. These groups never change the backend's part categories.
 export const groups = [
   ["cabin", "驾驶室"],
   ["chassis", "底盘"],
   ["engine", "发动机"],
-  ["transmission", "变速箱"],
+  ["transmission", "变速器"],
   ["interior", "内饰"],
-  ["paint_job", "涂装"],
+  ["paint_job", "喷漆"],
   ["exterior", "外观配件"],
   ["interior_accessories", "内饰配件"],
   ["other", "其他 / 未识别"],
@@ -15,13 +16,13 @@ export const groups = [
 
 export const labels: Record<string, string> = {
   engine: "发动机",
-  transmission: "变速箱",
+  transmission: "变速器",
   tank: "独立油箱",
   chassis: "底盘",
   cabin: "驾驶室",
   interior: "内饰",
   vehicle: "车辆基础",
-  paint_job: "涂装",
+  paint_job: "喷漆",
   f_tire: "前轮轮胎",
   r_tire: "后轮轮胎",
   f_disc: "前轮轮盘",
@@ -34,7 +35,7 @@ export const labels: Record<string, string> = {
   r_nuts: "后轮螺母",
   beacon: "警示灯",
   r_grill: "车顶灯架",
-  f_grill: "前部防护杆",
+  f_grill: "防撞杠",
   b_grill: "保险杠灯架",
   sunshld: "遮阳板",
   sunshield: "遮阳板",
@@ -44,7 +45,7 @@ export const labels: Record<string, string> = {
   r_bumper: "后保险杠",
   sideskirt: "侧裙",
   sideskrt_bar: "侧裙护杆",
-  mirror: "后视镜",
+  mirror: "主后视镜",
   f_mirror: "前部补盲镜",
   s_mirror: "侧面补盲镜",
   f_mudflap: "前挡泥板",
@@ -75,6 +76,17 @@ export const labels: Record<string, string> = {
   int_display: "车内显示屏",
   intlight_bck: "车内照明",
   intlight_bgr: "车内照明",
+  f_rim: "前轮轮辋",
+  r_rim: "后轮轮辋",
+  f_wheel: "前轮",
+  r_wheel: "后轮",
+  badge_a: "徽标",
+  badge_b: "徽标",
+  badge_c: "徽标",
+  c_badge: "徽标",
+  chs_badges: "底盘徽标",
+  p_decal: "贴花",
+  trlr_cables: "挂车电缆",
   unknown: "未识别配件",
 };
 const interiorCategories = new Set([
@@ -100,10 +112,111 @@ const interiorCategories = new Set([
   "int_display",
   "intlight_bck",
   "intlight_bgr",
+  "frntglss_mid",
 ]);
-export function categoryLabel(category: string) {
+export function categoryLabel(
+  category: string,
+  def?: Definition | null,
+  locale: "zh" | "en" = "zh",
+) {
+  const localized =
+    def?.category_names?.[locale === "en" ? "en" : "zh_cn"] ||
+    def?.category_names?.en;
+  if (localized) {
+    if (/^[fr]_(tire|disc|hub|nuts|cover|rim)$/.test(category))
+      return `${locale === "en" ? (category.startsWith("f_") ? "Front" : "Rear") : category.startsWith("f_") ? "前轮" : "后轮"} · ${localized}`;
+    return localized;
+  }
   return labels[category] || "未识别配件";
 }
+const exteriorCategories = new Set([
+  "air_tank",
+  "b_detector",
+  "b_grill",
+  "badge",
+  "badge_a",
+  "badge_b",
+  "badge_c",
+  "beacon",
+  "c_badge",
+  "c_grill",
+  "cab_door",
+  "cab_doorstep",
+  "chs_badges",
+  "cor_def",
+  "decals",
+  "doorhndl",
+  "doorstep",
+  "doortrim",
+  "exhaust_l",
+  "exhaust_m",
+  "exhaust_r",
+  "f_badge",
+  "f_bumper",
+  "f_cab_trim",
+  "f_chs_logo",
+  "f_disc",
+  "f_equip",
+  "f_fender",
+  "f_fender_cab",
+  "f_fender_chs",
+  "f_fendr_chs",
+  "f_grill",
+  "f_hub",
+  "f_inlay_cab",
+  "f_inlay_chs",
+  "f_intake_bar",
+  "f_intake_cab",
+  "f_intake_chs",
+  "f_intk_b_cab",
+  "f_intk_b_chs",
+  "f_light_bmp",
+  "f_light_chs",
+  "f_light_mid",
+  "f_light_top",
+  "f_logo",
+  "f_mirror",
+  "f_mudflap",
+  "f_nuts",
+  "f_tire",
+  "f_turn_light",
+  "f_wnd_frame",
+  "filter",
+  "head_light",
+  "hl_guard",
+  "l_horn",
+  "mirror",
+  "p_decal",
+  "r_bumper",
+  "r_chs_cover",
+  "r_deflector",
+  "r_disc",
+  "r_fender",
+  "r_fendr_top",
+  "r_grill",
+  "r_horn",
+  "r_hub",
+  "r_light",
+  "r_mudflap",
+  "r_nuts",
+  "r_tire",
+  "rear_window",
+  "s_badge",
+  "s_deflector",
+  "s_equip",
+  "s_guard",
+  "s_mirror",
+  "s_panel",
+  "s_reflector",
+  "s_strip",
+  "sideskirt",
+  "sideskrt_bar",
+  "sunshield",
+  "sunshld",
+  "tank",
+  "trlr_cables",
+  "windowtrim",
+]);
 export function groupOf(
   part: Pick<Accessory | Definition, "category" | "path">,
 ) {
@@ -122,31 +235,8 @@ export function groupOf(
   if (part.category === "vehicle" || part.category === "unknown")
     return "other";
   if (
-    [
-      "tank",
-      "beacon",
-      "r_grill",
-      "f_grill",
-      "b_grill",
-      "sunshld",
-      "sunshield",
-      "head_light",
-      "badge",
-      "f_bumper",
-      "r_bumper",
-      "sideskirt",
-      "sideskrt_bar",
-      "mirror",
-      "f_mirror",
-      "s_mirror",
-      "f_mudflap",
-      "r_mudflap",
-      "r_fender",
-      "exhaust_l",
-      "exhaust_r",
-      "exhaust_m",
-    ].includes(part.category) ||
-    /^(f|r)_(tire|disc|hub|nuts|cover|rim|wheel)$/.test(part.category)
+    exteriorCategories.has(part.category) ||
+    /^[fr]_(tire|disc|hub|nuts|cover|rim|wheel)$/.test(part.category)
   )
     return "exterior";
   return "other";
@@ -205,6 +295,7 @@ export type PartDisplay = {
   origin: string;
   summary: string;
   search: string;
+  nameSource: "game" | "fallback" | "unknown";
 };
 const clean = (s: string) => s.replace(/@@[^@]+@@/g, "").trim();
 const stemOf = (path: string) =>
@@ -312,29 +403,42 @@ export const metricLabels: Record<string, string> = {
   noise_volume: "滚动噪声",
   radius: "半径",
 };
+const displayCache = new WeakMap<
+  Definition,
+  Partial<Record<"zh" | "en", PartDisplay>>
+>();
 export function describePart(
   def: Definition | null | undefined,
   fallback?: Pick<Accessory, "path" | "category" | "name" | "model">,
+  locale: "zh" | "en" = "zh",
 ): PartDisplay {
+  const cached = def && displayCache.get(def)?.[locale];
+  if (cached) return cached;
+  const tr = (text: string, values?: Record<string, string | number>) =>
+    translate(locale === "en" ? "en" : "zh-CN", text, values);
   const p = def || fallback;
   if (!p)
     return {
-      title: "未识别配件",
-      origin: "来源未知",
-      summary: "参数未知",
+      title: tr("未识别配件"),
+      origin: tr("来源未知"),
+      summary: tr("参数未知"),
       search: "",
+      nameSource: "unknown",
     };
   const stem = stemOf(p.path);
   const brand = brands[p.model.split(".")[0]] || "";
   const origin = brand
-    ? `车型：${friendly(p.model)}`
+    ? tr("车型：{model}", { model: friendly(p.model) })
     : p.model && p.model !== "通用"
-      ? `车型：${friendly(p.model)}`
-      : "车型未标明";
-  const rawName = clean(p.name);
+      ? tr("车型：{model}", { model: friendly(p.model) })
+      : tr("车型未标明");
+  const gameName =
+    def?.names?.[locale === "en" ? "en" : "zh_cn"] || def?.names?.en;
+  const rawName = clean(gameName || p.name);
   const isFilename = rawName.replaceAll(" ", "_") === stem;
   let name = rawName;
-  if (p.category === "vehicle") name = `${friendly(p.model)} · 车辆基础`;
+  if (gameName) name = gameName;
+  else if (p.category === "vehicle") name = `${friendly(p.model)} · 车辆基础`;
   else if (p.category === "engine" && (isFilename || !name))
     name = engineName(stem, def);
   else if (p.category === "transmission" && (isFilename || !name))
@@ -347,32 +451,189 @@ export function describePart(
   )
     name = `${stem.replaceAll("_", " ")} 底盘`;
   else if (!name || isFilename || name === "data")
-    name = categoryLabel(p.category);
+    name = categoryLabel(p.category, def, locale);
+  if (!gameName) {
+    if (name.startsWith("发动机 · 变体 "))
+      name = tr("发动机 · 变体 {id}", {
+        id: name.slice("发动机 · 变体 ".length),
+      });
+    else if (name.endsWith(" 底盘"))
+      name = tr("{name} 底盘", { name: name.slice(0, -3) });
+    else if (name.endsWith(" · 车辆基础"))
+      name = tr("{name} · 车辆基础", { name: name.slice(0, -7) });
+    else name = tr(name);
+  }
   const title = `${brand && !name.toLowerCase().startsWith(brand.toLowerCase()) ? brand + " · " : ""}${name}`;
-  let summary = "参数未知";
+  let summary = tr("参数未知");
   if (def) {
     const rows = primaryMetrics(def);
     if (p.category === "engine")
-      summary = `${power(def) ? power(def) + " hp" : "功率未知"} · ${def.metrics.torque ? def.metrics.torque + " Nm" : "扭矩未知"}`;
+      summary = `${power(def) ? power(def) + " hp" : tr("功率未知")} · ${def.metrics.torque ? def.metrics.torque + " Nm" : tr("扭矩未知")}`;
     else if (p.category === "transmission")
       summary = rows
         .slice(0, 3)
-        .map(([k, v]) => `${k} ${v}`)
+        .map(([k, v]) => `${tr(k)} ${metricValue(v, locale)}`)
         .join(" · ");
     else if (p.category === "tank" || p.category === "chassis")
-      summary = rows.map(([k, v]) => `${k} ${v}`).join(" · ");
+      summary = rows
+        .map(([k, v]) => `${tr(k)} ${metricValue(v, locale)}`)
+        .join(" · ");
     else
       summary =
-        rawName && !isFilename ? categoryLabel(p.category) : "游戏名称未解析";
+        gameName || (rawName && !isFilename)
+          ? tr(categoryLabel(p.category, def, locale))
+          : tr("游戏名称未解析");
   }
   // Keep the exact variant searchable and inspectable, never invent a product name.
-  if (name === categoryLabel(p.category) && p.category !== "tank")
-    summary += ` · 变体 ${stem}`;
-  return {
+  if (
+    !gameName &&
+    name === tr(categoryLabel(p.category, def, locale)) &&
+    p.category !== "tank"
+  )
+    summary += ` · ${tr("变体 {id}", { id: stem })}`;
+  const display: PartDisplay = {
     title,
     origin,
     summary,
+    nameSource:
+      gameName || (def?.raw_name && !def.raw_name.includes("@@"))
+        ? "game"
+        : def
+          ? "fallback"
+          : "unknown",
     search:
-      `${title} ${origin} ${summary} ${p.name} ${p.path} ${categoryLabel(p.category)} ${def?.metrics.info || ""}`.toLowerCase(),
+      `${Object.values(def?.names || {}).join(" ")} ${title} ${origin} ${summary} ${p.name} ${p.path} ${categoryLabel(p.category, def, locale)} ${def?.metrics.info || ""}`.toLowerCase(),
   };
+  if (def) {
+    const entries = displayCache.get(def) || {};
+    entries[locale] = display;
+    displayCache.set(def, entries);
+  }
+  return display;
+}
+
+export function partOrigin(
+  def: Pick<Definition, "model" | "path">,
+): "brand" | "shared" | "unknown" {
+  if (brands[def.model.split(".")[0]]) return "brand";
+  if (
+    /^\/def\/vehicle\/(?:[fr]_(?:tire|disc|hub|nuts|cover|rim|wheel)|addon_hookup)\//.test(
+      def.path,
+    )
+  )
+    return "shared";
+  return "unknown";
+}
+const nameCollators = {
+  zh: new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" }),
+  en: new Intl.Collator("en", { numeric: true, sensitivity: "base" }),
+};
+export function compareParts(
+  a: Definition,
+  b: Definition,
+  locale: "zh" | "en" = "zh",
+) {
+  const ranks = { brand: 0, shared: 1, unknown: 2 };
+  const rank = ranks[partOrigin(a)] - ranks[partOrigin(b)];
+  if (rank) return rank;
+  const compare = nameCollators[locale].compare;
+  const unnamed = (def: Definition) =>
+    def.names && !Object.keys(def.names).length ? 1 : 0;
+  return (
+    unnamed(a) - unnamed(b) ||
+    compare(
+      brands[a.model.split(".")[0]] || "",
+      brands[b.model.split(".")[0]] || "",
+    ) ||
+    compare(
+      describePart(a, undefined, locale).title,
+      describePart(b, undefined, locale).title,
+    ) ||
+    compare(a.path, b.path)
+  );
+}
+const replaceable = new Set([
+  "engine",
+  "transmission",
+  "tank",
+  "f_tire",
+  "r_tire",
+  "f_disc",
+  "r_disc",
+  "f_hub",
+  "r_hub",
+  "f_nuts",
+  "r_nuts",
+]);
+const lockedCore = new Set([
+  "chassis",
+  "cabin",
+  "interior",
+  "vehicle",
+  "paint_job",
+]);
+const addable = new Set([
+  "beacon",
+  "r_grill",
+  "f_grill",
+  "sunshld",
+  "sunshield",
+]);
+export function replacementReason(part: Accessory | undefined): string | null {
+  if (!part) return "请先选择配件";
+  if (!part.definition) return "原配件定义未知，仅可查看";
+  if (lockedCore.has(part.category))
+    return "此核心部件暂不支持替换，仅可查看与比较";
+  if (
+    part.category === "engine" &&
+    (part.definition.metrics.type || "diesel") !== "diesel"
+  )
+    return "当前仅支持柴油发动机之间替换";
+  if (
+    !replaceable.has(part.category) &&
+    part.kind !== "vehicle_addon_accessory"
+  )
+    return "此配件类型暂不支持替换，仅可查看";
+  return null;
+}
+export function candidateReason(
+  part: Accessory | undefined,
+  candidate: Definition | null | undefined,
+  model: string,
+  action: "replace" | "add",
+  category: string | undefined,
+): string | null {
+  if (action === "add") {
+    if (!addable.has(category || ""))
+      return "此类别不可追加；核心部件不能重复安装";
+    if (!candidate) return "候选配件定义未知，仅可查看";
+    if (candidate.category !== category) return "候选配件类型与安装位置不匹配";
+    if (candidate.model !== model) return "此外观件的车型不匹配";
+    return null;
+  }
+  const reason = replacementReason(part);
+  if (reason) return reason;
+  if (!candidate) return "候选配件定义未知，仅可查看";
+  if (
+    candidate.kind !== part!.definition!.kind ||
+    candidate.category !== part!.category
+  )
+    return "候选配件类型与安装位置不匹配";
+  if (
+    candidate.category === "engine" &&
+    (candidate.metrics.type || "diesel") !== "diesel"
+  )
+    return "当前仅支持柴油发动机之间替换";
+  if (!replaceable.has(candidate.category) && candidate.model !== model)
+    return "此外观件的车型不匹配";
+  return null;
+}
+
+export function metricValue(value: string, locale: "zh" | "en" = "zh") {
+  if (locale !== "en") return value;
+  const gears = value.match(/^(\d+) 挡$/);
+  if (gears) return `${gears[1]} gears`;
+  const levels = value.match(/^(\d+) 级$/);
+  if (levels) return `${levels[1]} levels`;
+  return translate("en", value).replace("（引擎默认值）", " (game default)");
 }

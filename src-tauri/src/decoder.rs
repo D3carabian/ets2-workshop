@@ -8,8 +8,28 @@ use std::{
     time::{Duration, Instant},
 };
 pub const LIMIT: usize = 256 * 1024 * 1024;
+fn read_limited(reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
+    let bound = u64::try_from(limit)
+        .ok()
+        .and_then(|n| n.checked_add(1))
+        .ok_or_else(|| std::io::Error::other("读取大小限制无效"))?;
+    let mut data = Vec::new();
+    reader.take(bound).read_to_end(&mut data)?;
+    if data.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "存档超过读取大小限制",
+        ));
+    }
+    Ok(data)
+}
+pub fn read_bounded(file: &Path) -> Result<Vec<u8>> {
+    let reader =
+        std::fs::File::open(file).map_err(|e| format!("读取 {} 失败：{e}", file.display()))?;
+    read_limited(reader, LIMIT).map_err(|e| format!("读取 {} 失败：{e}", file.display()))
+}
 pub fn worker(file: &Path) -> Result<()> {
-    let data = std::fs::read(file).map_err(|e| e.to_string())?;
+    let data = read_bounded(file)?;
     let out = decode_direct(&data)?;
     std::io::stdout()
         .write_all(out.as_bytes())
@@ -40,10 +60,11 @@ pub fn decode_direct(data: &[u8]) -> Result<String> {
     Ok(text)
 }
 pub fn read(file: &Path) -> Result<String> {
-    let data = std::fs::read(file).map_err(|e| format!("读取 {} 失败：{e}", file.display()))?;
+    let data = read_bounded(file)?;
     if data.starts_with(b"SiiNunit") {
         return decode_direct(&data);
     }
+    drop(data);
     let mut command = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
     command
         .arg("--decode-worker")
@@ -55,12 +76,7 @@ pub fn read(file: &Path) -> Result<String> {
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let out = child.stdout.take().unwrap();
     let err = child.stderr.take().unwrap();
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        out.take((LIMIT + 1) as u64)
-            .read_to_end(&mut buf)
-            .map(|_| buf)
-    });
+    let reader = std::thread::spawn(move || read_limited(out, LIMIT));
     let errors = std::thread::spawn(move || {
         let mut buf = String::new();
         let _ = err.take(65536).read_to_string(&mut buf);
@@ -86,8 +102,40 @@ pub fn read(file: &Path) -> Result<String> {
     if !status.success() {
         return Err(format!("解密进程失败：{error}"));
     }
-    if buf.len() > LIMIT {
-        return Err("解密输出过大".into());
-    }
     String::from_utf8(buf).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_reader_consumes_at_most_limit_plus_one() {
+        struct CountingReader {
+            remaining: usize,
+            consumed: usize,
+        }
+        impl Read for CountingReader {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = buf.len().min(self.remaining);
+                buf[..n].fill(b'x');
+                self.remaining -= n;
+                self.consumed += n;
+                Ok(n)
+            }
+        }
+        for (limit, size) in [(0, 1000), (8, 1000), (8, 8), (8, 7)] {
+            let mut reader = CountingReader {
+                remaining: size,
+                consumed: 0,
+            };
+            let result = read_limited(&mut reader, limit);
+            assert_eq!(reader.consumed, size.min(limit + 1));
+            if size > limit {
+                assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+            } else {
+                assert_eq!(result.unwrap().len(), size);
+            }
+        }
+    }
 }
