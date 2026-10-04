@@ -1,2 +1,4 @@
 # These upstream license texts are verified byte-for-byte during packaging.
 /licenses/upstream/** -text
+/licenses/DecryptTruck-MIT.txt -text
+/src-tauri/vendor/decrypt-truck/LICENSE -text

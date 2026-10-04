@@ -5,20 +5,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const destination = path.resolve(process.argv[2] ?? '');
-const artifactRoot = path.join(root, 'release', 'artifacts') + path.sep;
-if (!destination.startsWith(artifactRoot) || fs.existsSync(destination)) {
-  throw new Error('License output must be a new directory under release/artifacts.');
-}
-const metadata = JSON.parse(execFileSync('cargo', [
-  'metadata', '--locked', '--format-version', '1', '--features', 'custom-protocol',
-  '--filter-platform', 'x86_64-pc-windows-msvc',
-  '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml'),
-], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
-const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
-const entries = [];
-const decoder = new TextDecoder('utf-8', { fatal: true });
-fs.mkdirSync(destination, { recursive: true });
 const supplements = {
   'alloc-stdlib@0.3.0': {
     source: 'https://github.com/dropbox/rust-alloc-no-stdlib/blob/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE',
@@ -45,6 +31,34 @@ const supplements = {
   },
 };
 supplements['webview2-com-sys@0.39.1'] = supplements['webview2-com@0.39.1'];
+// Validate every checked-in source even when a dependency now supplies its own text.
+const sourceFiles = new Map(Object.values(supplements).flatMap(s => s.files)
+  .map(([file, hash]) => [`licenses/upstream/${file}`, hash]));
+for (const file of ['licenses/DecryptTruck-MIT.txt', 'src-tauri/vendor/decrypt-truck/LICENSE']) {
+  sourceFiles.set(file, '3c64dbae48fba3efd8591f8e7e41ca6b9df76b9b2b3425f1e5c41c82a2f28b9c');
+}
+for (const [relative, expectedHash] of sourceFiles) {
+  const actualHash = createHash('sha256').update(fs.readFileSync(path.join(root, relative))).digest('hex');
+  if (actualHash !== expectedHash) throw new Error(`Source license hash mismatch: ${relative}`);
+}
+if (process.argv[2] === '--check-sources') {
+  console.log(`Verified ${sourceFiles.size} source license files.`);
+  process.exit(0);
+}
+const destination = path.resolve(process.argv[2] ?? '');
+const artifactRoot = path.join(root, 'release', 'artifacts') + path.sep;
+if (!destination.startsWith(artifactRoot) || fs.existsSync(destination)) {
+  throw new Error('License output must be a new directory under release/artifacts.');
+}
+const metadata = JSON.parse(execFileSync('cargo', [
+  'metadata', '--locked', '--format-version', '1', '--features', 'custom-protocol',
+  '--filter-platform', 'x86_64-pc-windows-msvc',
+  '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml'),
+], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+const entries = [];
+const decoder = new TextDecoder('utf-8', { fatal: true });
+fs.mkdirSync(destination, { recursive: true });
 const npmParents = {
   '@esbuild/win32-x64': 'esbuild',
   '@rollup/rollup-win32-x64-gnu': 'rollup',
