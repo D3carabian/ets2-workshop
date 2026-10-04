@@ -16,7 +16,7 @@
 4. 打开一个存档，选择卡车和要更换的配件，预览修改后保存。第一次尝试建议另存为新存档。
 5. 回到游戏，手动加载修改后的存档。之后可以在工具的改装记录中复查或恢复备份。
 
-不需要另外安装存档解密工具。如果电脑缺少 WebView2（用于显示应用界面的微软组件），启动器会提示安装。
+不需要另外安装存档解密工具。如果电脑缺少 WebView2（用于显示应用界面的微软组件），启动器会提供[微软官方下载页面](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)。请自行安装 Evergreen Standalone Installer（x64），完成后重新打开程序。
 
 ### 能改什么
 
@@ -37,7 +37,7 @@
 
 ### 存档与备份
 
-查看存档不会改动它。保存前，程序会检查游戏是否已经更新了这个存档，避免覆盖新的进度。备份可以恢复，但如果目标存档后来又被游戏修改，工具会阻止直接覆盖。
+查看存档不会改动它。保存前，程序会检查游戏是否已经更新了这个存档，避免覆盖新的进度。备份可以恢复，但如果目标存档后来又被游戏修改，工具会阻止直接覆盖。恢复只还原 `game.sii` 中的车辆和游戏进度，不删除存档槽，也不更改名称、截图或信息文件；另存的槽位会保留新名称。保存中断后，可在改装记录中查看备份位置、尝试恢复或清理该次操作的临时文件。
 
 ### 开发与致谢
 
@@ -59,7 +59,7 @@ For example, you can fit a Volvo engine to a Scania S, or increase its fuel capa
 4. Open a save, choose a truck and replacement parts, then review and save your changes. Saving to a new slot is recommended for your first attempt.
 5. Return to the game and load the edited save manually. You can later check your changes or restore a backup from the app's history page.
 
-No separate save decryption tool is needed. If WebView2, Microsoft's component for displaying the app interface, is missing, the launcher will offer to install it.
+No separate save decryption tool is needed. If WebView2, Microsoft's component for displaying the app interface, is missing, the launcher will direct you to [Microsoft's official download page](https://developer.microsoft.com/microsoft-edge/webview2/#download-section). Install the Evergreen Standalone Installer (x64) yourself, then reopen the app.
 
 ### What you can do
 
@@ -80,7 +80,7 @@ In-game tests with ETS2 1.61 confirmed that a Scania S could use an independent 
 
 ### Saves and backups
 
-Browsing a save does not change it. Before writing, the app checks whether the game has updated the save, to avoid overwriting newer progress. Backups can be restored, but the app blocks a direct restore if the game has since changed the destination save.
+Browsing a save does not change it. Before writing, the app checks whether the game has updated the save, to avoid overwriting newer progress. Backups can be restored, but the app blocks a direct restore if the game has since changed the destination save. Restore replaces only the vehicles and game progress in `game.sii`; it keeps the slot, name, screenshot, and information file. A new slot keeps its new name. After an interrupted save, use the history page to locate the backup, attempt a restore, or clean up that operation’s temporary files.
 
 ### Development and credits
 

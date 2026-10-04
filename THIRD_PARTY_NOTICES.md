@@ -20,7 +20,7 @@ Official documentation: https://modding.scssoft.com/wiki/Documentation/Tools/Gam
 
 ## Microsoft Edge WebView2 Runtime
 
-The launcher detects the installed Evergreen runtime. If missing, it offers to retrieve Microsoft's official bootstrapper and checks its Authenticode signature before running it. The runtime is provided and serviced by Microsoft under Microsoft's terms; it is not included in this ZIP.
+The launcher detects the installed Evergreen runtime. If missing, it displays Microsoft's official download page and asks the user to install the Evergreen Standalone Installer (x64), then restart the application. It does not download or execute a runtime installer. The runtime is provided and serviced by Microsoft under Microsoft's terms; it is not included in this ZIP.
 
 https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution
 

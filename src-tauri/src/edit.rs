@@ -5,6 +5,7 @@ use crate::{
     Result,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Operation {
     pub truck_id: String,
@@ -151,12 +152,23 @@ pub fn apply(
     let mut result = doc.clone();
     let mut changes = Vec::new();
     let mut warnings = Vec::new();
+    let mut trucks = inventory(&result, catalog)?;
+    let mut truck_indices: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut accessory_owner = HashMap::new();
+    for (index, truck) in trucks.iter().enumerate() {
+        truck_indices
+            .entry(truck.id.clone())
+            .or_default()
+            .push(index);
+        for accessory in &truck.accessories {
+            accessory_owner.entry(accessory.id.clone()).or_insert(index);
+        }
+    }
     for op in operations {
-        let trucks = inventory(&result, catalog)?;
-        let truck = trucks
-            .iter()
-            .find(|t| t.id == op.truck_id)
+        let indices = truck_indices
+            .get(&op.truck_id)
             .ok_or("目标不属于玩家车库")?;
+        let truck = &trucks[indices[0]];
         let def = catalog
             .definitions
             .get(&op.candidate_path)
@@ -257,10 +269,9 @@ pub fn apply(
                 .donor_accessory
                 .as_ref()
                 .ok_or("追加外观件必须从现有车辆选择供体，以验证安装配置")?;
-            let donor = trucks
-                .iter()
-                .find(|t| t.accessories.iter().any(|a| a.id == *donor_id))
-                .ok_or("供体配件不属于自有车辆")?;
+            let donor = &trucks[*accessory_owner
+                .get(donor_id)
+                .ok_or("供体配件不属于自有车辆")?];
             let source = donor
                 .accessories
                 .iter()
@@ -348,6 +359,7 @@ pub fn apply(
                     format!("{cloned}{newline}{newline}"),
                 ),
             ])?;
+            accessory_owner.insert(new_id, indices[0]);
             warnings.push("外观件的供体与安装结构已校验；实际外观与碰撞仍需进游戏检查".into());
         } else {
             return Err("未知操作".into());
@@ -362,12 +374,17 @@ pub fn apply(
             after: op.candidate_path.clone(),
             position: location,
         });
+        // Only this vehicle changes; later operations must see its updated definitions.
+        let updated =
+            crate::garage::truck(&result, catalog, &truck.id, truck.current, &truck.location)?;
+        for &index in indices {
+            trucks[index] = updated.clone();
+        }
     }
     result.validate_vehicles()?;
     if !operations.is_empty() {
         warnings.push("维修站的改装升级可能恢复原厂配件；实测普通维修及维修界面的部件更换可保留改装。升级后请用复查功能确认。".into());
     }
-    let trucks = inventory(&result, catalog)?;
     Ok((
         result,
         Preview {

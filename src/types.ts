@@ -76,6 +76,9 @@ export type Receipt = {
   source: string;
   output: string;
   backup: string;
+  state: "preparing" | "prepared" | "completed";
+  warning: string | null;
+  info_hash: string | null;
   before_hash: string;
   after_hash: string;
   changes: Change[];

@@ -47,9 +47,14 @@ impl Unit {
         if indexed.len() != count {
             return Err(format!("{} 的 {key} 数量与引用不一致", self.id));
         }
+        let indexed: HashMap<_, _> = indexed.iter().map(|f| (f.key.as_str(), *f)).collect();
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
-            out.push(self.field(&format!("{key}[{i}]"))?.value.clone());
+            let name = format!("{key}[{i}]");
+            let field = indexed
+                .get(name.as_str())
+                .ok_or_else(|| format!("{} 缺少字段 {name}", self.id))?;
+            out.push(field.value.clone());
         }
         Ok(out)
     }

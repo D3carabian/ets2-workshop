@@ -4,7 +4,6 @@ use crate::{
     storage::{app_dir, Settings},
     Result,
 };
-use serde::Serialize;
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -14,143 +13,64 @@ pub const EXTRACTOR_URL: &str = "https://download.eurotrucksimulator2.com/scs_ex
 pub const ARCHIVE_SHA: &str = "45385795fa830b975bd5c80a2076e17fa8398d8d23d679325e3b89b528b0229c";
 pub const EXE_SHA: &str = "55bd670691bee62c218220026a0b055bb597eb2c360e33e635c1c4c5c370ea29";
 pub const SETUP_VERSION: u32 = 1;
-#[derive(Serialize)]
-pub struct Detection {
-    pub games: Vec<String>,
-    pub documents: Vec<String>,
-    pub steam_roots: Vec<String>,
-    pub notes: Vec<String>,
-}
-fn add(paths: &mut Vec<String>, p: PathBuf) {
-    if p.is_dir() {
-        let canonical = p.canonicalize().unwrap_or(p);
-        let raw = canonical.to_string_lossy();
-        let s = if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") {
-            format!("//{}", unc.replace('\\', "/"))
-        } else {
-            raw.strip_prefix("\\\\?\\")
-                .unwrap_or(&raw)
-                .replace('\\', "/")
-        };
-        if !paths.iter().any(|x| x.eq_ignore_ascii_case(&s)) {
-            paths.push(s);
-        }
-    }
-}
+pub use crate::discovery::{library_paths, Detection, DiscoveryInputs};
 pub fn steam_roots() -> Vec<String> {
-    let mut roots = Vec::new();
-    #[cfg(windows)]
-    {
-        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-        if let Ok(k) = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Software\\Valve\\Steam") {
-            if let Ok(s) = k.get_value::<String, _>("SteamPath") {
-                add(&mut roots, PathBuf::from(s));
-            }
-        }
-    }
-    if let Some(p) = std::env::var_os("ProgramFiles(x86)") {
-        add(&mut roots, PathBuf::from(p).join("Steam"));
-    }
-    roots
-}
-pub fn library_paths(text: &str) -> Vec<PathBuf> {
-    let re = regex::Regex::new(r#""path"\s+"((?:\\.|[^"\\])*)""#).unwrap();
-    re.captures_iter(text)
-        .map(|c| PathBuf::from(c[1].replace("\\\\", "\\")))
-        .collect()
+    crate::discovery::detect(&DiscoveryInputs::from_host()).steam_roots
 }
 pub fn detect() -> Detection {
-    let steam = steam_roots();
-    let mut games = Vec::new();
-    let mut documents = Vec::new();
-    if let Some(u) = directories::UserDirs::new() {
-        if let Some(p) = u.document_dir() {
-            add(&mut documents, p.join("Euro Truck Simulator 2"));
-        }
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        add(
-            &mut documents,
-            PathBuf::from(home).join("Documents/Euro Truck Simulator 2"),
-        );
-    }
-    for key in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
-        if let Some(p) = std::env::var_os(key) {
-            add(
-                &mut documents,
-                PathBuf::from(p).join("Documents/Euro Truck Simulator 2"),
-            );
-        }
-    }
-    for root in &steam {
-        let root = PathBuf::from(root);
-        let mut libraries = vec![root.clone()];
-        if let Ok(vdf) = std::fs::read_to_string(root.join("steamapps/libraryfolders.vdf")) {
-            libraries.extend(library_paths(&vdf));
-        }
-        for lib in libraries {
-            let manifest = lib.join("steamapps/appmanifest_227300.acf");
-            if let Ok(text) = std::fs::read_to_string(manifest) {
-                let re = regex::Regex::new(r#""installdir"\s+"([^"]+)""#).unwrap();
-                if let Some(c) = re.captures(&text) {
-                    let game = lib.join("steamapps/common").join(&c[1]);
-                    if game.join("def.scs").is_file() {
-                        add(&mut games, game);
-                    }
-                }
-            }
-            let game = lib.join("steamapps/common/Euro Truck Simulator 2");
-            if game.join("def.scs").is_file() {
-                add(&mut games, game);
-            }
-        }
-    }
-    for docs in documents.clone() {
-        if let Ok(log) = std::fs::read_to_string(Path::new(&docs).join("game.log.txt")) {
-            if let Some(line) = log.lines().find(|l| l.contains("[sys] Command line:")) {
-                let cmd = line
-                    .split("Command line:")
-                    .nth(1)
-                    .unwrap_or("")
-                    .trim()
-                    .replace('\\', "/");
-                if let Some((prefix, _)) = cmd.split_once("/bin/") {
-                    let p = PathBuf::from(prefix.trim().trim_start_matches('"'));
-                    if p.join("def.scs").is_file() {
-                        add(&mut games, p);
-                    }
-                }
-                let re = regex::Regex::new(r#"(?i)-homedir\s+(?:"([^"]+)"|(\S+))"#).unwrap();
-                if let Some(c) = re.captures(&cmd) {
-                    add(
-                        &mut documents,
-                        PathBuf::from(c.get(1).or_else(|| c.get(2)).unwrap().as_str()),
-                    );
-                }
-            }
-        }
-    }
-    Detection {
-        games,
-        documents,
-        steam_roots: steam,
-        notes: vec![
-            "路径只用于读取本机游戏和存档；确认后才保存设置。".into(),
-            "首次建立配件目录会从 SCS 官方下载约 0.3 MB 解包工具，需要联网。".into(),
-            "仅支持原版与官方 DLC。检测到 Mod 依赖的存档将拒绝打开。".into(),
-        ],
-    }
+    detect_with(&DiscoveryInputs::from_host())
+}
+pub fn detect_with(inputs: &DiscoveryInputs) -> Detection {
+    crate::discovery::detect(inputs)
 }
 pub fn managed_extractor() -> PathBuf {
     app_dir().join("tools/scs-extractor-1.55/scs_extractor.exe")
 }
-fn verified_exe(path: &Path) -> bool {
-    std::fs::read(path)
-        .map(|b| hash(&b) == EXE_SHA)
-        .unwrap_or(false)
+// Atomic replacement keeps a valid cache/settings file intact on write failure.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let temp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|e| e.to_string())?;
+        f.write_all(bytes)
+            .and_then(|_| f.sync_all())
+            .map_err(|e| e.to_string())?;
+        drop(f);
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::*;
+            let from: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
+            let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+            if unsafe {
+                MoveFileExW(
+                    from.as_ptr(),
+                    to.as_ptr(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            } == 0
+            {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+        }
+        #[cfg(not(windows))]
+        std::fs::rename(&temp, path).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 pub fn unpack_verified(bytes: &[u8]) -> Result<Vec<u8>> {
-    if hash(bytes) != ARCHIVE_SHA {
+    unpack_with_hashes(bytes, ARCHIVE_SHA, EXE_SHA)
+}
+fn unpack_with_hashes(bytes: &[u8], archive_sha: &str, exe_sha: &str) -> Result<Vec<u8>> {
+    if bytes.len() > 8 * 1024 * 1024 || hash(bytes) != archive_sha {
         return Err("官方下载文件校验失败，未安装或执行。请更新应用后重试。".into());
     }
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
@@ -164,18 +84,12 @@ pub fn unpack_verified(bytes: &[u8]) -> Result<Vec<u8>> {
     file.take(4 * 1024 * 1024 + 1)
         .read_to_end(&mut out)
         .map_err(|e| e.to_string())?;
-    if hash(&out) != EXE_SHA {
-        return Err("解包工具校验失败".into());
+    if out.len() > 4 * 1024 * 1024 || hash(&out) != exe_sha {
+        return Err("解包工具校验失败，未安装或执行。请更新应用后重试。".into());
     }
     Ok(out)
 }
-pub fn ensure_extractor(progress: &dyn Fn(&str)) -> Result<PathBuf> {
-    let target = managed_extractor();
-    if verified_exe(&target) {
-        progress("解包工具已就绪");
-        return Ok(target);
-    }
-    progress("正在从 SCS 官方下载解包工具…");
+fn download_extractor() -> Result<Vec<u8>> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(60))
         .redirect(reqwest::redirect::Policy::limited(3))
@@ -190,18 +104,106 @@ pub fn ensure_extractor(progress: &dyn Fn(&str)) -> Result<PathBuf> {
     response
         .take(8 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    let exe = unpack_verified(&bytes)?;
-    std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-    let temp = target.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-    std::fs::write(&temp, exe).map_err(|e| e.to_string())?;
-    // Remove only our corrupted managed binary, after the replacement has passed both hashes.
-    if target.exists() {
-        std::fs::remove_file(&target).map_err(|e| e.to_string())?;
+        .map_err(|e| format!("下载中断：{e}。检查网络后可重试。"))?;
+    Ok(bytes)
+}
+fn acquire_extractor(
+    target: &Path,
+    exe_sha: &str,
+    download: impl FnOnce() -> Result<Vec<u8>>,
+    unpack: impl FnOnce(&[u8]) -> Result<Vec<u8>>,
+    progress: &dyn Fn(&str),
+) -> Result<PathBuf> {
+    // Bound cached reads too; an invalid or replaced file must never be executed.
+    let cached = std::fs::File::open(target).and_then(|f| {
+        let mut b = Vec::new();
+        f.take(4 * 1024 * 1024 + 1).read_to_end(&mut b)?;
+        Ok(b)
+    });
+    if cached.is_ok_and(|b| b.len() <= 4 * 1024 * 1024 && hash(&b) == exe_sha) {
+        progress("解包工具已就绪");
+        return Ok(target.into());
     }
-    std::fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+    progress("正在从 SCS 官方下载解包工具…");
+    let exe = unpack(&download()?)?;
+    std::fs::create_dir_all(target.parent().ok_or("解包工具路径无效")?)
+        .map_err(|e| format!("无法建立工具缓存：{e}。请检查应用数据目录权限和剩余空间后重试。"))?;
+    write_atomic(target, &exe).map_err(|e| {
+        format!("无法保存解包工具：{e}。请关闭占用工具的程序，检查目录权限和剩余空间后重试。")
+    })?;
     progress("官方解包工具已下载并通过校验");
-    Ok(target)
+    Ok(target.into())
+}
+pub fn ensure_extractor(progress: &dyn Fn(&str)) -> Result<PathBuf> {
+    acquire_extractor(
+        &managed_extractor(),
+        EXE_SHA,
+        download_extractor,
+        unpack_verified,
+        progress,
+    )
+}
+
+pub fn prepare(
+    s: Settings,
+    progress: &dyn Fn(&str),
+) -> Result<(Settings, crate::catalog::Catalog)> {
+    prepare_with(
+        s,
+        &app_dir(),
+        progress,
+        || ensure_extractor(progress),
+        crate::catalog::build,
+    )
+}
+fn prepare_with(
+    mut s: Settings,
+    data: &Path,
+    progress: &dyn Fn(&str),
+    extractor: impl FnOnce() -> Result<PathBuf>,
+    build: impl FnOnce(&Path, &Path, &Path) -> Result<crate::catalog::Catalog>,
+) -> Result<(Settings, crate::catalog::Catalog)> {
+    progress("正在检查游戏和存档目录…");
+    validate(&s)?;
+    s.extractor = extractor()?.to_string_lossy().into();
+    progress("正在建立配件目录，首次解包可能需要数分钟…");
+    let c = build(Path::new(&s.game), Path::new(&s.extractor), data).map_err(|e| {
+        format!("配件目录准备失败：{e}。请检查游戏文件、缓存目录权限和剩余空间后重试。")
+    })?;
+    if c.definitions.is_empty() {
+        return Err("未发现配件定义，请检查游戏目录后重试。".into());
+    }
+    std::fs::create_dir_all(data)
+        .map_err(|e| format!("无法写入应用数据：{e}。请检查目录权限和剩余空间后重试。"))?;
+    let previous: Option<Settings> = std::fs::read(data.join("settings.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
+    // Commit the settings pointer last: failed reconfiguration preserves the old catalog too.
+    s.catalog_file = format!("catalog-{}.json", uuid::Uuid::new_v4().simple());
+    let catalog_path = data.join(&s.catalog_file);
+    write_atomic(&catalog_path, &serde_json::to_vec(&c).unwrap())
+        .map_err(|e| format!("无法保存配件目录：{e}。请检查目录权限和剩余空间后重试。"))?;
+    s.onboarding_version = SETUP_VERSION;
+    if let Err(e) = write_atomic(
+        &data.join("settings.json"),
+        &serde_json::to_vec_pretty(&s).unwrap(),
+    ) {
+        let _ = std::fs::remove_file(&catalog_path);
+        return Err(format!(
+            "配置未完成：无法保存设置：{e}。请检查应用数据目录权限后重试。"
+        ));
+    }
+    if let Some(old) = previous {
+        let old_path = crate::storage::catalog_path(&old, data);
+        // Retire only the previous managed generation AFTER the new pointer is durable.
+        if !old.catalog_file.is_empty()
+            && old_path.file_name().is_some_and(|n| n != "catalog.json")
+            && old_path != catalog_path
+        {
+            let _ = std::fs::remove_file(old_path);
+        }
+    }
+    Ok((s, c))
 }
 pub fn validate(s: &Settings) -> Result<()> {
     let game = Path::new(&s.game);
@@ -218,7 +220,7 @@ pub fn validate(s: &Settings) -> Result<()> {
             "请选择 ETS2 用户数据目录，其中应包含 profiles、steam_profiles 或 config.cfg".into(),
         );
     }
-    Ok(())
+    crate::discovery::validate_documents(docs)
 }
 #[cfg(test)]
 mod tests {
@@ -238,5 +240,185 @@ mod tests {
     #[test]
     fn reject_unverified_download() {
         assert!(unpack_verified(b"not a trusted zip").is_err());
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+    use crate::{
+        catalog::{Catalog, Definition},
+        storage,
+    };
+    use std::collections::{BTreeMap, HashMap};
+    fn sandbox() -> tempfile::TempDir {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/setup-tests");
+        std::fs::create_dir_all(&root).unwrap();
+        tempfile::tempdir_in(root).unwrap()
+    }
+    fn archive() -> (Vec<u8>, Vec<u8>) {
+        use std::io::Write;
+        let exe = b"synthetic extractor bytes, never executed".to_vec();
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        zip.start_file(
+            "scs_extractor.exe",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        zip.write_all(&exe).unwrap();
+        (zip.finish().unwrap().into_inner(), exe)
+    }
+    #[test]
+    fn download_failure_hash_failure_corrupt_cache_and_retry() {
+        let dir = sandbox();
+        let target = dir.path().join("tools/scs_extractor.exe");
+        let (zip, exe) = archive();
+        let attempt = |download: Result<Vec<u8>>| {
+            acquire_extractor(
+                &target,
+                &hash(&exe),
+                || download,
+                |b| unpack_with_hashes(b, &hash(&zip), &hash(&exe)),
+                &|_| {},
+            )
+        };
+        assert!(attempt(Err("network unavailable; retry".into())).is_err());
+        assert!(!target.exists());
+        assert!(attempt(Ok(b"invalid download".to_vec())).is_err());
+        assert!(!target.exists());
+        assert!(unpack_with_hashes(&zip, &hash(&zip), "wrong executable hash").is_err());
+        attempt(Ok(zip.clone())).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), exe);
+        // A verified cache must work offline without invoking download.
+        acquire_extractor(
+            &target,
+            &hash(&exe),
+            || panic!("cache should skip network"),
+            |_| panic!("skip unpack"),
+            &|_| {},
+        )
+        .unwrap();
+        std::fs::write(&target, b"corrupt cache").unwrap();
+        assert!(attempt(Err("offline".into())).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"corrupt cache");
+        attempt(Ok(zip.clone())).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), exe);
+    }
+    #[test]
+    fn unwritable_cache_does_not_leave_temporary_files() {
+        let dir = sandbox();
+        let target = dir.path().join("scs_extractor.exe");
+        std::fs::create_dir(&target).unwrap(); // deterministic target conflict on every platform
+        let (zip, exe) = archive();
+        let e = acquire_extractor(
+            &target,
+            &hash(&exe),
+            || Ok(zip.clone()),
+            |b| unpack_with_hashes(b, &hash(&zip), &hash(&exe)),
+            &|_| {},
+        )
+        .unwrap_err();
+        assert!(e.contains("重试"));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    fn fixture(dir: &Path) -> (Settings, Catalog) {
+        let game = dir.join("中文 game");
+        std::fs::create_dir_all(game.join("bin/win_x64")).unwrap();
+        std::fs::write(game.join("bin/win_x64/eurotrucks2.exe"), b"fixture").unwrap();
+        std::fs::write(game.join("def.scs"), b"fixture").unwrap();
+        let documents = dir.join("用户 docs");
+        std::fs::create_dir_all(documents.join("profiles")).unwrap();
+        let s: Settings =
+            serde_json::from_value(serde_json::json!({"game":game,"documents":documents})).unwrap();
+        let d = Definition {
+            path: "/def/vehicle/truck/test/engine/test.sii".into(),
+            kind: "accessory_engine_data".into(),
+            unit: "test".into(),
+            name: "test".into(),
+            category: "engine".into(),
+            model: "test".into(),
+            source: "synthetic".into(),
+            metrics: BTreeMap::new(),
+            suitable: vec![],
+            conflicts: vec![],
+            requires: vec![],
+        };
+        (
+            s,
+            Catalog {
+                definitions: HashMap::from([(d.path.clone(), d)]),
+                ..Catalog::default()
+            },
+        )
+    }
+    #[test]
+    fn setup_failure_retry_and_reload_are_transactional() {
+        let dir = sandbox();
+        let data = dir.path().join("app");
+        let (s, catalog) = fixture(dir.path());
+        let prepare = |s: Settings, c: Result<Catalog>| {
+            prepare_with(
+                s,
+                &data,
+                &|_| {},
+                || Ok(dir.path().join("extractor")),
+                |_, _, _| c,
+            )
+        };
+        assert!(!data.exists()); // discovery/validation require no persistence
+        assert!(prepare(s.clone(), Err("extraction failed".into())).is_err());
+        assert!(!data.join("settings.json").exists());
+        let (saved, _) = prepare(s.clone(), Ok(catalog.clone())).unwrap();
+        let bytes = std::fs::read(data.join("settings.json")).unwrap();
+        let reloaded: Settings = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(reloaded.onboarding_version, SETUP_VERSION);
+        assert_eq!(reloaded.game, s.game);
+        let old_catalog = storage::catalog_path(&saved, &data);
+        assert!(old_catalog.is_file());
+        assert!(prepare(s.clone(), Err("retry failed".into())).is_err());
+        assert_eq!(std::fs::read(data.join("settings.json")).unwrap(), bytes);
+        assert!(old_catalog.is_file());
+        // Simulate failure at the LAST write, after catalog creation.
+        std::fs::remove_file(data.join("settings.json")).unwrap();
+        std::fs::create_dir(data.join("settings.json")).unwrap();
+        let before = std::fs::read_dir(&data).unwrap().count();
+        assert!(prepare(s.clone(), Ok(catalog.clone()))
+            .err()
+            .unwrap()
+            .contains("配置未完成"));
+        assert_eq!(std::fs::read_dir(&data).unwrap().count(), before);
+        std::fs::remove_dir(data.join("settings.json")).unwrap();
+        prepare(s, Ok(catalog)).unwrap();
+    }
+    #[test]
+    #[cfg(windows)]
+    fn locked_settings_preserve_previous_configuration_and_allow_retry() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = sandbox();
+        let data = dir.path().join("app");
+        let (s, c) = fixture(dir.path());
+        let prepare = || {
+            prepare_with(
+                s.clone(),
+                &data,
+                &|_| {},
+                || Ok(dir.path().join("extractor")),
+                |_, _, _| Ok(c.clone()),
+            )
+        };
+        prepare().unwrap();
+        let path = data.join("settings.json");
+        let previous = std::fs::read(&path).unwrap();
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        assert!(prepare().is_err());
+        drop(locked);
+        assert_eq!(std::fs::read(path).unwrap(), previous);
+        assert_eq!(std::fs::read_dir(&data).unwrap().count(), 2);
+        prepare().unwrap();
+        assert_eq!(std::fs::read_dir(&data).unwrap().count(), 2);
     }
 }

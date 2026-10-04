@@ -1,4 +1,4 @@
-// Run garage-ui-fixture.mjs, Vite, then the baseline debug Tauri executable with
+// Build the merged custom-protocol Tauri app, run garage-ui-fixture.mjs, then launch with
 // ETS2_WORKSHOP_DATA_DIR=verification/garage-ui/app and WebView2 CDP port 9231.
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
@@ -10,11 +10,12 @@ try {
   const page = browser
     .contexts()
     .flatMap((c) => c.pages())
-    .find((p) => p.url().includes("localhost:1420"));
-  assert(
-    page,
-    "The baseline Tauri debug app must be using this worktree's Vite server",
-  );
+    .find(
+      (p) =>
+        p.url().includes("localhost:1420") ||
+        p.url().includes("tauri.localhost"),
+    );
+  assert(page, "Use the freshly built merged Tauri app");
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   const init = await page.evaluate(() =>
@@ -35,7 +36,9 @@ try {
   await page.locator(".savebar select").selectOption(option);
   await page.getByRole("button", { name: "打开存档", exact: true }).click();
   await page.waitForSelector(".truck-card");
-  assert.equal(await page.locator(".truck-card").count(), 80);
+  assert.equal(await page.locator(".truck-card").count(), 50);
+  await page.getByRole("button", { name: "下一页", exact: true }).click();
+  assert.equal(await page.locator(".truck-card").count(), 30);
   const measurements = [];
   for (const viewport of [
     { width: 1440, height: 940 },
@@ -43,12 +46,18 @@ try {
   ]) {
     await page.setViewportSize(viewport);
     await page
-      .locator(".fleet")
+      .locator(".fleet-list")
       .evaluate((el) => (el.scrollTop = el.scrollHeight));
+    const pager = await page.locator(".fleet > .button-row").boundingBox();
     const before = await page.locator(".inspector").boundingBox();
     const windowBefore = await page.evaluate(() => window.scrollY);
     await page.locator(".truck-card").filter({ hasText: "TEST 079" }).click();
     const after = await page.locator(".inspector").boundingBox();
+    assert.equal(
+      (await page.locator(".fleet > .button-row").boundingBox()).y,
+      pager.y,
+      "Pagination must remain visible while the list scrolls",
+    );
     assert.equal(
       after.y,
       before.y,
@@ -56,7 +65,7 @@ try {
     );
     assert.equal(await page.evaluate(() => window.scrollY), windowBefore);
     assert.ok(
-      await page.locator(".fleet").evaluate((el) => el.scrollTop > 1000),
+      await page.locator(".fleet-list").evaluate((el) => el.scrollTop > 1000),
     );
     assert.equal(
       await page.locator(".inspector").evaluate((el) => el.scrollTop),
@@ -86,7 +95,9 @@ try {
     measurements.push({
       viewport,
       inspectorTop: after.y,
-      fleetScroll: await page.locator(".fleet").evaluate((el) => el.scrollTop),
+      fleetScroll: await page
+        .locator(".fleet-list")
+        .evaluate((el) => el.scrollTop),
     });
     await page.getByLabel("配件类别", { exact: true }).selectOption("chassis");
     await page.locator(".part-row").click();
@@ -131,6 +142,19 @@ try {
     await readFile(source, "utf8"),
     original,
     "Staging must not write the fixture save",
+  );
+  await page.getByLabel("搜索卡车", { exact: true }).fill("TEST 079");
+  assert.equal(await page.locator(".truck-card").count(), 1);
+  assert.equal(
+    await page.locator(".fleet-list").evaluate((el) => el.scrollTop),
+    0,
+  );
+  await page.getByLabel("搜索卡车", { exact: true }).fill("");
+  assert.equal(await page.locator(".truck-card").count(), 50);
+  await page.getByRole("button", { name: "下一页", exact: true }).click();
+  assert.equal(
+    await page.locator(".fleet-list").evaluate((el) => el.scrollTop),
+    0,
   );
   assert.deepEqual(errors, []);
   await writeFile(

@@ -33,6 +33,7 @@ export default function Onboarding({
   async function detect() {
     setBusy(true);
     setError("");
+    setProgress("正在检测 Steam 游戏库与存档目录…");
     try {
       const d = await invoke<Detection>("rpc", {
         payload: { action: "detect" },
@@ -40,10 +41,18 @@ export default function Onboarding({
       setDetected(d);
       setValue((v) => ({
         ...v,
-        game: d.games.includes(v.game) ? v.game : d.games[0] || v.game,
-        documents: d.documents.includes(v.documents)
-          ? v.documents
-          : d.documents[0] || v.documents,
+        game:
+          v.onboarding_version > 0 || detected
+            ? v.game
+            : d.games.length === 1
+              ? d.games[0]
+              : "",
+        documents:
+          v.onboarding_version > 0 || detected
+            ? v.documents
+            : d.documents.length === 1
+              ? d.documents[0]
+              : "",
       }));
     } catch (e) {
       setError(String(e));
@@ -120,6 +129,20 @@ export default function Onboarding({
             <small>
               已检测到 {detected?.games.length || 0} 个安装位置，可手动修改。
             </small>
+            {(detected?.games.length || 0) > 1 && (
+              <select
+                aria-label="选择游戏安装位置"
+                value={detected?.games.includes(value.game) ? value.game : ""}
+                onChange={(e) => setValue({ ...value, game: e.target.value })}
+              >
+                <option value="">检测到多个安装位置，请选择或手动填写</option>
+                {detected?.games.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
           <label>
             ETS2 用户数据目录
@@ -140,7 +163,34 @@ export default function Onboarding({
               包含 profiles、steam_profiles 或
               config.cfg，通常与游戏安装目录不同。
             </small>
+            {(detected?.documents.length || 0) > 1 && (
+              <select
+                aria-label="选择用户数据位置"
+                value={
+                  detected?.documents.includes(value.documents)
+                    ? value.documents
+                    : ""
+                }
+                onChange={(e) =>
+                  setValue({ ...value, documents: e.target.value })
+                }
+              >
+                <option value="">
+                  检测到多个用户数据位置，请选择或手动填写
+                </option>
+                {detected?.documents.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
+          {detected?.notes.map((note) => (
+            <p className="detection-note" key={note}>
+              {note}
+            </p>
+          ))}
           <div className="wizard-facts">
             <span>
               <Check size={16} />

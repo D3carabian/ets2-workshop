@@ -7,16 +7,13 @@
   min-height: 0;
   min-width: 0;
 }
-.garage-grid .fleet,
+.garage-grid .fleet-list,
 .garage-grid .inspector {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
 }
 .garage-grid .fleet > .section-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   background: #f3f5f2;
   margin-bottom: 8px;
 }
@@ -108,4 +105,34 @@
 }
 .garage-grid .candidates {
   overscroll-behavior-y: contain;
+}
+
+.garage-grid .fleet {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.garage-grid .fleet-list {
+  flex: 1;
+  min-height: 0;
+}
+.garage-grid .fleet > .section-head,
+.garage-grid .fleet > .search,
+.garage-grid .fleet > .button-row {
+  flex-shrink: 0;
+}
+.garage-grid .fleet > .search {
+  margin-bottom: 10px;
+}
+.garage-grid .fleet > .button-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 10px;
+  font-size: 11px;
+}
+.garage-grid .fleet > .button-row button {
+  padding: 7px 3px;
+  font-size: 11px;
 }

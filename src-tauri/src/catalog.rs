@@ -294,20 +294,41 @@ pub fn build(game: &Path, extractor: &Path, cache: &Path) -> Result<Catalog> {
         let key = hash(format!("{}:{}:{:?}", stable_path, meta.len(), meta.modified()).as_bytes());
         let root = cache.join("extracted").join(&key[..16]);
         if !root.join(".complete").exists() {
-            std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-            let mut cmd = Command::new(extractor);
-            cmd.arg(&pack).arg(&root);
-            #[cfg(windows)]
-            cmd.creation_flags(0x08000000);
-            let output = cmd.output().map_err(|e| e.to_string())?;
-            if !output.status.success() {
-                return Err(format!(
-                    "解包失败 {}: {}",
-                    pack.display(),
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-            std::fs::write(root.join(".complete"), b"ok").map_err(|e| e.to_string())?;
+            // The official extractor interprets non-ASCII command-line paths incorrectly.
+            // Use ASCII relative arguments inside an isolated staging directory instead.
+            let stage = root.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+            std::fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
+            let extraction = (|| -> Result<()> {
+                let input = stage.join("input.scs");
+                if std::fs::hard_link(&pack, &input).is_err() {
+                    std::fs::copy(&pack, &input).map_err(|e| e.to_string())?;
+                }
+                let mut cmd = Command::new(extractor.canonicalize().map_err(|e| e.to_string())?);
+                cmd.current_dir(&stage).arg("input.scs").arg("output");
+                #[cfg(windows)]
+                cmd.creation_flags(0x08000000);
+                let output = cmd.output().map_err(|e| e.to_string())?;
+                if !output.status.success() {
+                    return Err(format!(
+                        "解包失败 {}: {}",
+                        pack.display(),
+                        String::from_utf8_lossy(&output.stderr)
+                    ));
+                }
+                let extracted = stage.join("output");
+                // Do not cache an empty/unreadable base archive as a completed extraction.
+                if pack.file_name().is_some_and(|n| n == "def.scs") {
+                    Catalog::scan(&[(extracted.clone(), "def.scs".into())])?;
+                }
+                std::fs::write(extracted.join(".complete"), b"ok").map_err(|e| e.to_string())?;
+                if root.exists() {
+                    std::fs::remove_dir_all(&root).map_err(|e| e.to_string())?;
+                }
+                std::fs::rename(extracted, &root).map_err(|e| e.to_string())?;
+                Ok(())
+            })();
+            let _ = std::fs::remove_dir_all(&stage);
+            extraction?;
         }
         roots.push((root, pack.file_name().unwrap().to_string_lossy().into()));
     }
