@@ -1,0 +1,111 @@
+/* Keep scrolling local to each working area, including at the minimum window size. */
+.workspace .garage-grid {
+  height: max(380px, calc(100dvh - 320px));
+  align-items: stretch;
+}
+.garage-grid > * {
+  min-height: 0;
+  min-width: 0;
+}
+.garage-grid .fleet,
+.garage-grid .inspector {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+.garage-grid .fleet > .section-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f3f5f2;
+  margin-bottom: 8px;
+}
+.garage-grid .parts-panel {
+  display: flex;
+  flex-direction: column;
+}
+.garage-grid .parts-panel > .section-head,
+.garage-grid .filters,
+.garage-grid .panel-foot {
+  flex-shrink: 0;
+}
+.garage-grid .part-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+.garage-grid .filters {
+  flex-wrap: wrap;
+}
+.garage-grid .filters select {
+  width: 130px;
+}
+.garage-grid .filters .search {
+  min-width: 110px;
+}
+.part-highlight,
+.candidate-spec {
+  display: block;
+  color: #235a43;
+  font-size: 12px;
+  margin: 7px 0;
+  line-height: 1.6;
+}
+.candidate > span {
+  min-width: 0;
+}
+.candidate strong,
+.candidate small,
+.candidate-spec {
+  overflow-wrap: anywhere;
+}
+.candidate .candidate-spec {
+  font-size: 12px;
+  font-weight: 700;
+}
+.current-part h3 {
+  line-height: 1.45;
+}
+.current-part > span:last-child {
+  display: block;
+  line-height: 1.6;
+}
+.garage-grid .part-description small {
+  white-space: normal;
+  line-height: 1.6;
+}
+.part-source {
+  margin-bottom: 12px;
+}
+.part-source p {
+  font-size: 11px;
+  margin-bottom: 5px;
+  overflow-wrap: anywhere;
+}
+.comparison-head,
+.comparison-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  font-size: 11px;
+  padding: 8px 0;
+  border-bottom: 1px solid #e7ecdf;
+}
+.comparison-head {
+  color: #75886f;
+}
+.comparison-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  max-height: 100px;
+  overflow: auto;
+}
+.comparison-row strong {
+  color: #235a43;
+}
+.garage-grid .candidates {
+  overscroll-behavior-y: contain;
+}

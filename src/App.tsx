@@ -1,4 +1,5 @@
 import Onboarding from "./Onboarding";
+import "./garage.css";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -34,53 +35,16 @@ import type {
   Verification,
 } from "./types";
 
-const labels: Record<string, string> = {
-  engine: "发动机",
-  transmission: "变速箱",
-  tank: "独立油箱",
-  chassis: "底盘",
-  cabin: "驾驶室",
-  interior: "内饰",
-  vehicle: "车辆基础",
-  paint_job: "涂装",
-  f_tire: "前轮轮胎",
-  r_tire: "后轮轮胎",
-  f_disc: "前轮轮毂",
-  r_disc: "后轮轮毂",
-  beacon: "警示灯",
-  r_grill: "车顶灯架",
-  f_grill: "防撞杆",
-  sunshld: "遮阳板",
-  sunshield: "遮阳板",
-  head_light: "前大灯",
-  badge: "车型铭牌",
-  unknown: "未识别",
-};
-const metrics: Record<string, string> = {
-  type: "动力类型",
-  price: "商店价格 (€)",
-  torque: "峰值扭矩 (Nm)",
-  rpm_limit: "转速上限 (rpm)",
-  rpm_limit_neutral: "空挡上限 (rpm)",
-  volume: "排量 (L)",
-  fuel_tank_size: "燃油容量 (L)",
-  tank_size: "底盘油箱 (L)",
-  differential_ratio: "主减速比",
-  retarder: "缓速器级数",
-  info: "游戏显示信息",
-  ratios_forward: "前进挡齿比",
-  ratios_reverse: "倒挡齿比",
-  torque_curve: "扭矩曲线",
-  consumption_coef: "油耗系数",
-};
-const friendly = (s: string) =>
-  s
-    .replace("scania.s_2016", "Scania S")
-    .replace("volvo.fh_2024", "Volvo FH6")
-    .replace("daf.2021", "DAF XG / XG+")
-    .replace("daf.xf", "DAF XF105")
-    .replaceAll("_", " ")
-    .replaceAll(".", " ");
+import {
+  labels,
+  groups,
+  groupOf,
+  friendly,
+  describePart,
+  truckDefinition,
+  categoryLabel,
+} from "./parts";
+import { Metrics, Comparison } from "./PartMetrics";
 const short = (p: string) => p.split("/").slice(-2).join("/");
 async function rpc<T>(
   action: string,
@@ -190,10 +154,8 @@ export default function App() {
   const parts =
     truck?.accessories.filter(
       (a) =>
-        (filter === "all" || a.category === filter) &&
-        `${a.name} ${a.path} ${labels[a.category] || ""}`
-          .toLowerCase()
-          .includes(partQuery.toLowerCase()),
+        (filter === "all" || groupOf(a) === filter) &&
+        describePart(a.definition, a).search.includes(partQuery.toLowerCase()),
     ) || [];
   const candidates = useMemo(() => {
     if (source === "donor")
@@ -205,25 +167,25 @@ export default function App() {
             path: a.path,
             donor: a.id,
             name: a.name,
-            model: friendly(t.model),
-            detail: t.plate,
+            model: a.model,
+            detail: `${friendly(t.model)} · ${t.plate || "无车牌"}`,
             definition: a.definition,
           })),
       );
     return definitions
-      .filter((d) => d.category === category)
+      .filter((d) => d.category === category && truckDefinition(d))
       .map((d) => ({
         key: d.path,
         path: d.path,
         donor: null,
         name: d.name,
-        model: friendly(d.model),
+        model: d.model,
         detail: d.source,
         definition: d,
       }));
   }, [source, trucks, definitions, category, truck?.id]);
   const visibleCandidates = candidates.filter((c) =>
-    `${c.name} ${c.model} ${c.path} ${c.detail}`
+    `${describePart(c.definition, { name: c.name, path: c.path, model: c.model, category: category || "unknown" }).search} ${c.detail}`
       .toLowerCase()
       .includes(candidateQuery.toLowerCase()),
   );
@@ -450,7 +412,7 @@ export default function App() {
               ) : (
                 <>
                   <div className="garage-grid">
-                    <section className="fleet">
+                    <section className="fleet" aria-label="车库列表">
                       <div className="section-head">
                         <h2>我的卡车</h2>
                         <span>{trucks.length} 辆</span>
@@ -516,16 +478,18 @@ export default function App() {
                           onChange={(e) => setFilter(e.target.value)}
                         >
                           <option value="all">所有类别</option>
-                          {Array.from(
-                            new Set(truck?.accessories.map((a) => a.category)),
-                          ).map((c) => (
-                            <option key={c} value={c}>
-                              {labels[c] || c}
+                          {groups.map(([id, name]) => (
+                            <option key={id} value={id}>
+                              {name}
                             </option>
                           ))}
                         </select>
                       </div>
-                      <div className="part-list">
+                      <div
+                        className="part-list"
+                        key={truck?.id}
+                        aria-label="当前车辆配件"
+                      >
                         {parts.map((a) => (
                           <button
                             key={a.id}
@@ -542,13 +506,15 @@ export default function App() {
                             </span>
                             <span className="part-description">
                               <strong>
-                                {labels[a.category] || a.category}
+                                {categoryLabel(a.category)}
                                 <em>
                                   {a.definition ? "已识别" : "只读 / 未索引"}
                                 </em>
                               </strong>
-                              <span>{a.name}</span>
-                              <small title={a.path}>{short(a.path)}</small>
+                              <span>{describePart(a.definition, a).title}</span>
+                              <small>
+                                {describePart(a.definition, a).summary}
+                              </small>
                             </span>
                             <ChevronRight size={15} />
                           </button>
@@ -562,7 +528,11 @@ export default function App() {
                         未识别字段仍会保留
                       </div>
                     </section>
-                    <section className="inspector">
+                    <section
+                      className="inspector"
+                      aria-label="配件详情与替换"
+                      key={truck?.id}
+                    >
                       <div className="section-head">
                         <h2>
                           {action === "add" ? "追加外观附件" : "配件详情"}
@@ -628,12 +598,30 @@ export default function App() {
                                   当前{" "}
                                   {labels[part!.category] || part!.category}
                                 </span>
-                                <h3>{part!.name}</h3>
-                                <span>{friendly(part!.model)}</span>
+                                <h3>
+                                  {describePart(part!.definition, part!).title}
+                                </h3>
+                                <b className="part-highlight">
+                                  {
+                                    describePart(part!.definition, part!)
+                                      .summary
+                                  }
+                                </b>
+                                <span>
+                                  {describePart(part!.definition, part!).origin}
+                                </span>
                               </div>
-                              <Metrics def={part!.definition} />
+                              <details className="current-metrics">
+                                <summary>当前配件全部参数</summary>
+                                <Metrics def={part!.definition} />
+                              </details>
                               <details className="raw">
                                 <summary>查看原始字段与定义路径</summary>
+                                <code className="break">{part!.path}</code>
+                                <p>
+                                  原始名称：{part!.name} · 原始分类：
+                                  {part!.category}
+                                </p>
                                 <pre>{part!.raw}</pre>
                                 <p>
                                   refund 是存档退款字段；替换时保留原值{" "}
@@ -671,7 +659,7 @@ export default function App() {
                             <Search size={15} />
                             <input
                               aria-label="搜索候选配件"
-                              placeholder="搜索车型或配件"
+                              placeholder="搜索品牌、型号、马力或配件"
                               value={candidateQuery}
                               onChange={(e) =>
                                 setCandidateQuery(e.target.value)
@@ -689,9 +677,24 @@ export default function App() {
                                 onClick={() => setChosen(c.key)}
                               >
                                 <span>
-                                  <strong>{c.name}</strong>
+                                  <strong>
+                                    {
+                                      describePart(c.definition, {
+                                        name: c.name,
+                                        path: c.path,
+                                        model: c.model,
+                                        category: category || "unknown",
+                                      }).title
+                                    }
+                                  </strong>
+                                  <b className="candidate-spec">
+                                    {describePart(c.definition).summary}
+                                  </b>
                                   <small>
-                                    {c.model} · {c.detail}
+                                    {describePart(c.definition).origin}
+                                    {source === "donor"
+                                      ? ` · 供体 ${c.detail || "无车牌"}`
+                                      : ""}
                                   </small>
                                 </span>
                                 {chosen === c.key && <Check size={15} />}
@@ -703,10 +706,20 @@ export default function App() {
                               </p>
                             )}
                           </div>
+                          {visibleCandidates.length > 150 && (
+                            <p className="micro">
+                              共 {visibleCandidates.length} 项，显示前 150
+                              项。输入品牌、型号或马力缩小范围。
+                            </p>
+                          )}
                           {selected && (
                             <div className="candidate-metrics">
-                              <Metrics def={selected.definition} />
-                              <small className="break">{selected.path}</small>
+                              <Comparison
+                                before={
+                                  action === "replace" ? part?.definition : null
+                                }
+                                after={selected.definition}
+                              />
                             </div>
                           )}
                           <button
@@ -892,10 +905,9 @@ export default function App() {
               </div>
               <div className="catalog-grid">
                 {definitions
+                  .filter(truckDefinition)
                   .filter((d) =>
-                    `${d.name} ${d.path} ${labels[d.category] || ""}`
-                      .toLowerCase()
-                      .includes(catalogQuery.toLowerCase()),
+                    describePart(d).search.includes(catalogQuery.toLowerCase()),
                   )
                   .slice(0, 120)
                   .map((d) => (
@@ -903,8 +915,11 @@ export default function App() {
                       <span className="tag">
                         {labels[d.category] || d.category}
                       </span>
-                      <h3>{d.name}</h3>
-                      <p>{friendly(d.model)}</p>
+                      <h3>{describePart(d).title}</h3>
+                      <b className="part-highlight">
+                        {describePart(d).summary}
+                      </b>
+                      <p>{describePart(d).origin}</p>
                       <Metrics def={d} />
                       <details>
                         <summary>路径与适配条件</summary>
@@ -1150,20 +1165,5 @@ export default function App() {
         </div>
       )}
     </div>
-  );
-}
-function Metrics({ def }: { def: Definition | null | undefined }) {
-  if (!def)
-    return <p className="micro">该定义尚未索引。原始配件数据会完整保留。</p>;
-  const values = Object.entries(def.metrics).filter(([k]) => k !== "price");
-  return (
-    <dl className="metrics">
-      {values.slice(0, 8).map(([k, v]) => (
-        <div key={k}>
-          <dt>{metrics[k] || k}</dt>
-          <dd title={v}>{v}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
