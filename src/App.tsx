@@ -81,6 +81,13 @@ const friendly = (s: string) =>
     .replace("daf.xf", "DAF XF105")
     .replaceAll("_", " ")
     .replaceAll(".", " ");
+const FLEET_PAGE_SIZE = 50;
+const pathKey = (path: string) =>
+  path
+    .replaceAll("\\", "/")
+    .replace(/^\/\/\?\/UNC\//i, "//")
+    .replace(/^\/\/\?\//, "")
+    .toLowerCase();
 const short = (p: string) => p.split("/").slice(-2).join("/");
 async function rpc<T>(
   action: string,
@@ -104,6 +111,8 @@ export default function App() {
   const [manualPath, setManualPath] = useState("");
   const [opened, setOpened] = useState<Opened | null>(null);
   const [truckId, setTruckId] = useState("");
+  const [fleetQuery, setFleetQuery] = useState("");
+  const [fleetPage, setFleetPage] = useState(0);
   const [partId, setPartId] = useState("");
   const [definitions, setDefinitions] = useState<Definition[]>([]);
   const [count, setCount] = useState(0);
@@ -140,11 +149,14 @@ export default function App() {
       setBusy("");
     }
   }
-  async function refresh() {
+  async function refresh(preferred?: string) {
     const list = await rpc<SaveEntry[]>("discover");
     setSaves(list);
-    setSavePath((p) =>
-      list.some((s) => s.path === p) ? p : list[0]?.path || "",
+    setSavePath(
+      (p) =>
+        list.find((s) => pathKey(s.path) === pathKey(preferred || p))?.path ||
+        list[0]?.path ||
+        "",
     );
   }
   async function open(path: string) {
@@ -153,6 +165,15 @@ export default function App() {
     setPreview(null);
     const doc = await rpc<Opened>("open", { path });
     setOpened(doc);
+    setFleetQuery("");
+    setFleetPage(
+      Math.floor(
+        Math.max(
+          0,
+          doc.trucks.findIndex((t) => t.current),
+        ) / FLEET_PAGE_SIZE,
+      ),
+    );
     setTruckId(
       doc.trucks.find((t) => t.current)?.id || doc.trucks[0]?.id || "",
     );
@@ -184,6 +205,21 @@ export default function App() {
     });
   }, []);
   const trucks = preview?.trucks || opened?.trucks || [];
+  const filteredTrucks = useMemo(() => {
+    const query = fleetQuery.trim().toLowerCase();
+    return query
+      ? trucks.filter((t) =>
+          `${friendly(t.model)} ${t.plate} ${t.id}`
+            .toLowerCase()
+            .includes(query),
+        )
+      : trucks;
+  }, [trucks, fleetQuery]);
+  const fleetPages = Math.max(
+    1,
+    Math.ceil(filteredTrucks.length / FLEET_PAGE_SIZE),
+  );
+  const shownFleetPage = Math.min(fleetPage, fleetPages - 1);
   const truck = trucks.find((t) => t.id === truckId) || trucks[0];
   const part = truck?.accessories.find((a) => a.id === partId);
   const category = action === "add" ? addCategory : part?.category;
@@ -267,20 +303,44 @@ export default function App() {
     setOperations(next);
   }
   async function save() {
-    const r = await rpc<Receipt>("commit", {
-      operations,
-      mode: saveMode,
-      name: newName,
-    });
+    let r: Receipt;
+    try {
+      r = await rpc<Receipt>("commit", {
+        operations,
+        mode: saveMode,
+        name: newName,
+      });
+    } catch (e) {
+      setSaveModal(false);
+      try {
+        setReceipts(await rpc<Receipt[]>("history"));
+      } catch {
+        /* retry in history */
+      }
+      throw e;
+    }
     setSaveModal(false);
-    setReceipts(await rpc<Receipt[]>("history"));
-    await refresh();
-    await open(r.output);
-    setSavePath(r.output);
-    setNotice({
-      text: `已保存${saveMode === "new" ? "为 " + newName : ""}。请在游戏中手动加载；备份已保留。`,
-      error: false,
-    });
+    setOpened(null);
+    setOperations([]);
+    setPreview(null);
+    const message =
+      r.warning ||
+      `已保存${saveMode === "new" ? "为 " + newName : ""}。请在游戏中手动加载；备份已保留。`;
+    try {
+      setReceipts(await rpc<Receipt[]>("history"));
+      await refresh(r.output);
+      if (r.state === "completed") {
+        await open(r.output);
+      } else {
+        setPage("history");
+      }
+      setNotice({ text: message, error: !!r.warning });
+    } catch (e) {
+      setNotice({
+        text: `${message} 刷新界面失败：${String(e)}。备份：${r.backup}`,
+        error: true,
+      });
+    }
   }
   const tabs = [
     ["garage", "车库", TruckIcon],
@@ -455,32 +515,73 @@ export default function App() {
                         <h2>我的卡车</h2>
                         <span>{trucks.length} 辆</span>
                       </div>
-                      {trucks.map((t) => (
-                        <button
-                          className={
-                            "truck-card " +
-                            (truck?.id === t.id ? "selected" : "")
-                          }
-                          key={t.id}
-                          onClick={() => {
-                            setTruckId(t.id);
-                            setPartId("");
-                            setChosen("");
-                            setFilter("all");
+                      <label className="search">
+                        <Search size={16} />
+                        <input
+                          aria-label="搜索卡车"
+                          placeholder="车型、车牌或编号"
+                          value={fleetQuery}
+                          onChange={(e) => {
+                            setFleetQuery(e.target.value);
+                            setFleetPage(0);
                           }}
-                        >
-                          <div className="truck-card-top">
-                            <TruckIcon size={23} />
-                            {t.current && <span className="tag">正在驾驶</span>}
-                          </div>
-                          <strong>{friendly(t.model)}</strong>
-                          <div className="plate">{t.plate || "未设置车牌"}</div>
-                          <small>
-                            {t.accessories.length} 个配件{" "}
-                            <ChevronRight size={13} />
-                          </small>
-                        </button>
-                      ))}
+                        />
+                      </label>
+                      {fleetPages > 1 && (
+                        <div className="button-row">
+                          <button
+                            disabled={shownFleetPage === 0}
+                            onClick={() => setFleetPage(shownFleetPage - 1)}
+                          >
+                            上一页
+                          </button>
+                          <span>
+                            {shownFleetPage + 1} / {fleetPages}
+                          </span>
+                          <button
+                            disabled={shownFleetPage + 1 === fleetPages}
+                            onClick={() => setFleetPage(shownFleetPage + 1)}
+                          >
+                            下一页
+                          </button>
+                        </div>
+                      )}
+                      {!filteredTrucks.length && <p>没有匹配的卡车</p>}
+                      {filteredTrucks
+                        .slice(
+                          shownFleetPage * FLEET_PAGE_SIZE,
+                          (shownFleetPage + 1) * FLEET_PAGE_SIZE,
+                        )
+                        .map((t) => (
+                          <button
+                            className={
+                              "truck-card " +
+                              (truck?.id === t.id ? "selected" : "")
+                            }
+                            key={t.id}
+                            onClick={() => {
+                              setTruckId(t.id);
+                              setPartId("");
+                              setChosen("");
+                              setFilter("all");
+                            }}
+                          >
+                            <div className="truck-card-top">
+                              <TruckIcon size={23} />
+                              {t.current && (
+                                <span className="tag">正在驾驶</span>
+                              )}
+                            </div>
+                            <strong>{friendly(t.model)}</strong>
+                            <div className="plate">
+                              {t.plate || "未设置车牌"}
+                            </div>
+                            <small>
+                              {t.accessories.length} 个配件{" "}
+                              <ChevronRight size={13} />
+                            </small>
+                          </button>
+                        ))}
                     </section>
                     <section className="parts-panel">
                       <div className="section-head">
@@ -977,6 +1078,16 @@ export default function App() {
                       </span>
                     </div>
                     <code className="break">{r.output}</code>
+                    {r.state === "preparing" && (
+                      <p>
+                        准备未完成，本工具尚未写入目标。备份可能不完整，可清理临时文件后重新保存。
+                      </p>
+                    )}
+                    {r.state === "prepared" && (
+                      <p>
+                        写入未确认或已中断。备份保留在下方位置；恢复时会核对目标内容，拒绝覆盖新的进度。
+                      </p>
+                    )}
                     {r.changes.map((c, i) => (
                       <p key={i}>
                         {friendly(c.model)} · {labels[c.category] || c.category}{" "}
@@ -1005,6 +1116,19 @@ export default function App() {
                         恢复修改前
                       </button>
                     </div>
+                    <button
+                      onClick={() =>
+                        task("清理临时文件", async () => {
+                          await rpc("cleanup", { id: r.id });
+                          setNotice({
+                            text: "已清理该记录的临时文件，备份和存档已保留",
+                            error: false,
+                          });
+                        })
+                      }
+                    >
+                      清理临时文件
+                    </button>
                     <details>
                       <summary>备份位置</summary>
                       <code className="break">{r.backup}</code>
@@ -1125,7 +1249,9 @@ export default function App() {
           <section className="modal">
             <h2>恢复修改前的存档？</h2>
             <p>
-              仅当目标仍是本工具写入的版本时才会恢复。游戏产生的新进度不会被直接覆盖。
+              仅恢复车辆和游戏进度文件
+              game.sii，不删除存档槽，也不恢复名称、截图或 info.sii。
+              另存的槽位会保留新名称。恢复前会核对目标内容，新记录也会核对存档信息；发现更新则拒绝恢复。
             </p>
             <div className="button-row">
               <button disabled={!!busy} onClick={() => setRestoreId("")}>
@@ -1140,9 +1266,22 @@ export default function App() {
                       id: restoreId,
                     });
                     setRestoreId("");
-                    await refresh();
-                    if (opened?.path === path) await open(path);
-                    setNotice({ text: "已恢复修改前的游戏数据", error: false });
+                    setOpened(null);
+                    setOperations([]);
+                    setPreview(null);
+                    try {
+                      await refresh(path);
+                      await open(path);
+                      setNotice({
+                        text: "已恢复修改前的 game.sii；存档名称和信息保持不变",
+                        error: false,
+                      });
+                    } catch (e) {
+                      setNotice({
+                        text: `恢复已完成，刷新界面失败：${String(e)}`,
+                        error: true,
+                      });
+                    }
                   })
                 }
               >

@@ -387,6 +387,15 @@ pub fn validate_documents(documents: &Path) -> Result<()> {
         for profile in directories(&documents.join(name))? {
             directories(&profile)?;
             for slot in directories(&profile.join("save"))? {
+                // Interrupted Workshop staging directories are private, never selectable saves.
+                if slot
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".workshop-")
+                {
+                    continue;
+                }
                 directories(&slot)?;
             }
         }
@@ -417,6 +426,15 @@ pub fn discover(documents: &Path, inputs: &DiscoveryInputs) -> Result<Vec<SaveEn
         }
         for profile in directories(&root)? {
             for slot in directories(&profile.join("save"))? {
+                // Interrupted Workshop staging directories are private, never selectable saves.
+                if slot
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".workshop-")
+                {
+                    continue;
+                }
                 let path = slot.join("game.sii");
                 if !optional_metadata(&path)?.is_some_and(|m| m.is_file()) {
                     continue;

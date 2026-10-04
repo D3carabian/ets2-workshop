@@ -78,6 +78,7 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
                 v["name"].as_str().unwrap_or("workshop"),
                 &engine.settings,
             )?;
+            engine.session = None;
             Ok(json!(r))
         }
         "catalog" => {
@@ -106,12 +107,14 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
             Ok(json!({"count":count,"warnings":engine.catalog.warnings}))
         }
         "history" => Ok(json!(storage::receipts())),
-        "restore" => Ok(json!(storage::restore(field(&v, "id")?)?)),
+        "cleanup" => Ok(json!(storage::cleanup(field(&v, "id")?)?)),
+        "restore" => {
+            let path = storage::restore(field(&v, "id")?)?;
+            engine.session = None;
+            Ok(json!(path))
+        }
         "verify" => {
-            let r = storage::receipts()
-                .into_iter()
-                .find(|r| r.id == v["id"].as_str().unwrap_or(""))
-                .ok_or("找不到改装记录")?;
+            let r = storage::receipt(field(&v, "id")?)?;
             let s = Session::open(Path::new(field(&v, "path")?), &engine.settings)?;
             Ok(json!(workshop_core::edit::verify(
                 &s.doc,

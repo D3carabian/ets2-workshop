@@ -37,7 +37,7 @@
 
 ### 存档与备份
 
-查看存档不会改动它。保存前，程序会检查游戏是否已经更新了这个存档，避免覆盖新的进度。备份可以恢复，但如果目标存档后来又被游戏修改，工具会阻止直接覆盖。
+查看存档不会改动它。保存前，程序会检查游戏是否已经更新了这个存档，避免覆盖新的进度。备份可以恢复，但如果目标存档后来又被游戏修改，工具会阻止直接覆盖。恢复只还原 `game.sii` 中的车辆和游戏进度，不删除存档槽，也不更改名称、截图或信息文件；另存的槽位会保留新名称。保存中断后，可在改装记录中查看备份位置、尝试恢复或清理该次操作的临时文件。
 
 ### 开发与致谢
 
@@ -80,7 +80,7 @@ In-game tests with ETS2 1.61 confirmed that a Scania S could use an independent 
 
 ### Saves and backups
 
-Browsing a save does not change it. Before writing, the app checks whether the game has updated the save, to avoid overwriting newer progress. Backups can be restored, but the app blocks a direct restore if the game has since changed the destination save.
+Browsing a save does not change it. Before writing, the app checks whether the game has updated the save, to avoid overwriting newer progress. Backups can be restored, but the app blocks a direct restore if the game has since changed the destination save. Restore replaces only the vehicles and game progress in `game.sii`; it keeps the slot, name, screenshot, and information file. A new slot keeps its new name. After an interrupted save, use the history page to locate the backup, attempt a restore, or clean up that operation’s temporary files.
 
 ### Development and credits
 
