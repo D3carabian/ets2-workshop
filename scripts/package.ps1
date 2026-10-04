@@ -10,6 +10,7 @@ $inputs = @{
     'workshop-app.exe' = 'src-tauri/target/release/ets2-workshop.exe'
     'workshop-cli.exe' = 'src-tauri/target/release/workshop-cli.exe'
     'README.md' = 'README.md'
+    'LICENSE' = 'LICENSE'
     'THIRD_PARTY_NOTICES.md' = 'THIRD_PARTY_NOTICES.md'
 }
 foreach ($source in $inputs.Values) {

@@ -1,5 +1,7 @@
 # Third-party notices
 
+ETS2 Workshop is licensed under the MIT License in the root `LICENSE` file. The third-party components below retain their own licenses and copyright notices.
+
 ## DecryptTruck
 
 This application includes and compiles DecryptTruck 1.3.7, by Fernando Garrido (SiberianCoffe), licensed under MIT.

@@ -19,7 +19,7 @@ function Invoke-SourceCheck {
     if ($LASTEXITCODE -ne 0) { throw "License source check rejected: $output" }
 }
 try {
-    foreach ($relative in @('scripts/package.ps1', 'scripts/check-release.ps1', 'scripts/verify-package.ps1', 'scripts/licenses.mjs', 'package.json', 'package-lock.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'src-tauri/vendor/decrypt-truck/LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.md')) {
+    foreach ($relative in @('scripts/package.ps1', 'scripts/check-release.ps1', 'scripts/verify-package.ps1', 'scripts/licenses.mjs', 'package.json', 'package-lock.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'src-tauri/vendor/decrypt-truck/LICENSE', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
         $destination = Join-Path $fixture $relative
         New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $repoRoot $relative) -Destination $destination
@@ -98,6 +98,10 @@ fs.writeFileSync(path.join(root, 'inventory.json'), JSON.stringify({ packages: [
     }
     Mutate-Zip 'ETS2 Workshop.exe' @() -Delete
     Assert-Rejected 'missing launcher' { & (Join-Path $fixture 'scripts/verify-package.ps1') -ZipPath $zipPath } 'Missing ZIP entry'
+    Mutate-Zip 'LICENSE' @() -Delete
+    Assert-Rejected 'missing project license' { & (Join-Path $fixture 'scripts/verify-package.ps1') -ZipPath $zipPath } 'Missing ZIP entry'
+    Mutate-Zip 'LICENSE' ([Text.Encoding]::UTF8.GetBytes('modified'))
+    Assert-Rejected 'project license changed inside ZIP' { & (Join-Path $fixture 'scripts/verify-package.ps1') -ZipPath $zipPath } 'Project license content changed'
     Mutate-Zip 'README.md' ([Text.Encoding]::UTF8.GetBytes('# English only'))
     Assert-Rejected 'README without both languages' { & (Join-Path $fixture 'scripts/verify-package.ps1') -ZipPath $zipPath } 'Chinese and English'
     Mutate-Zip 'licenses/dependencies/texts/npm-synthetic-1.0.0/01-LICENSE.txt' ([Text.Encoding]::UTF8.GetBytes('modified'))

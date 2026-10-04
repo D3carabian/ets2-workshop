@@ -21,9 +21,11 @@ try {
         try { $stream.CopyTo($memory); return ,$memory.ToArray() } finally { $stream.Dispose(); $memory.Dispose() }
     }
     $allowed = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($name in @('ETS2 Workshop.exe', 'workshop-app.exe', 'workshop-cli.exe', 'README.md', 'THIRD_PARTY_NOTICES.md', 'licenses/dependencies/inventory.json', 'licenses/dependencies/DEPENDENCIES.md')) {
+    foreach ($name in @('ETS2 Workshop.exe', 'workshop-app.exe', 'workshop-cli.exe', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/dependencies/inventory.json', 'licenses/dependencies/DEPENDENCIES.md')) {
         [void]$allowed.Add($name)
     }
+    $projectLicenseHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData((Read-Entry 'LICENSE')))
+    if ($projectLicenseHash -cne (Get-FileHash -LiteralPath (Join-Path $repoRoot 'LICENSE') -Algorithm SHA256).Hash) { throw 'Project license content changed in ZIP.' }
     foreach ($name in $release.LicenseFiles) {
         $target = "licenses/$name"
         [void]$allowed.Add($target)

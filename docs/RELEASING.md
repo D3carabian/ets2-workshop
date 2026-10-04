@@ -30,6 +30,7 @@ Node 选择顺序为：显式 `-NodeDirectory`，否则依次寻找 PATH 中可�
 - `workshop-app.exe`（Tauri 主程序）
 - `workshop-cli.exe`
 - `README.md`
+- `LICENSE`（项目 MIT 许可证）
 - `THIRD_PARTY_NOTICES.md`
 - `licenses/` 中的许可文本
 
@@ -58,6 +59,6 @@ ZIP 完整解压后运行 `ETS2 Workshop.exe`，不要单独移动 EXE；无需�
 
 目前 ZIP 不包含代码签名；Windows 的来源提示与存档兼容性是不同的问题。首次配置与游戏内修改验证仍需要人工检查；CI 通过不代表所有游戏版本和配件组合均已验证。
 
-## 项目许可证待决策
+## 项目许可证
 
-整个项目的许可证尚待维护者选择。第三方 MIT 等许可只适用于对应依赖，不能据此声明整个项目采用 MIT。发布检查保留全部第三方声明和原文，本阶段不替维护者选择项目许可证。
+本项目采用根目录 `LICENSE` 中的 MIT 许可证，npm 和 Cargo 元数据同步声明为 `MIT`。发布包包含该文件，并校验其内容与源码一致；第三方组件保留各自的许可证和版权声明。
