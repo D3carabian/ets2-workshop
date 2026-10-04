@@ -40,13 +40,15 @@
 
 ### 存档与备份
 
+存档列表默认显示手动存档和快速存档；勾选“包含自动存档”即可显示 autosave，程序会记住选择。未变化的名称会复用缓存，刷新仍会检查新存档和改名。
+
 查看存档不会改动它。保存前，程序会检查游戏是否已经更新了这个存档，避免覆盖新的进度。备份可以恢复，但如果目标存档后来又被游戏修改，工具会阻止直接覆盖。恢复只还原 `game.sii` 中的车辆和游戏进度，不删除存档槽，也不更改名称、截图或信息文件；另存的槽位会保留新名称。保存中断后，可在改装记录中查看备份位置、尝试恢复或清理该次操作的临时文件。
 
 ### 开发与致谢
 
 界面使用 Tauri 和 React，存档处理使用 Rust。构建和发布方法见[开发文档](docs/RELEASING.md)，测试情况见[验证记录](docs/REVIEW.md)。
 
-存档解码基于 [DecryptTruck](https://github.com/CoffeSiberian/DecryptTruck)，读取游戏配件使用 [SCS 官方解包工具](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor)。相关许可见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目是非官方工具。
+存档解码基于 [DecryptTruck](https://github.com/CoffeSiberian/DecryptTruck)，读取游戏配件采用按需读取，遇到不支持的归档时使用 [SCS 官方解包工具](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor)。相关许可见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目是非官方工具。
 
 ## English
 
@@ -86,10 +88,12 @@ After upgrading, use Settings → Build / update library to load in-game names. 
 
 ### Saves and backups
 
+The list shows manual saves and quicksaves by default. Enable “Include autosaves” to show autosave slots; the app remembers your choice. Unchanged names are cached, while refreshing still checks for new or renamed saves.
+
 Browsing a save does not change it. Before writing, the app checks whether the game has updated the save, to avoid overwriting newer progress. Backups can be restored, but the app blocks a direct restore if the game has since changed the destination save. Restore replaces only the vehicles and game progress in `game.sii`; it keeps the slot, name, screenshot, and information file. A new slot keeps its new name. After an interrupted save, use the history page to locate the backup, attempt a restore, or clean up that operation’s temporary files.
 
 ### Development and credits
 
 The interface uses Tauri and React, with Rust handling saves. See the [build and release guide](docs/RELEASING.md) and [validation notes](docs/REVIEW.md), currently in Chinese.
 
-Save decoding is based on [DecryptTruck](https://github.com/CoffeSiberian/DecryptTruck). Game parts are read using the [official SCS archive extractor](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor). See [third-party notices](THIRD_PARTY_NOTICES.md) for licenses. This is an unofficial project.
+Save decoding is based on [DecryptTruck](https://github.com/CoffeSiberian/DecryptTruck). Game parts are read selectively, with the [official SCS archive extractor](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor) used for unsupported archives. See [third-party notices](THIRD_PARTY_NOTICES.md) for licenses. This is an unofficial project.

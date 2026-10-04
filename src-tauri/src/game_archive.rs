@@ -6,7 +6,8 @@
 //! below is MIT-licensed scs_tools src/cityhash.rs, pinned to commit
 //! e147e755778579e78f80a406a53c64515113d7a1, using Google's 2011 CityHash variant.
 //! Its original notices are retained in licenses/locale-cityhash-MIT.txt.
-//! No directory walk, extraction to disk, game writes, or external tools.
+//! Selective catalog extraction reads only definition and locale trees. Unsupported
+//! selected resources return an error so the caller can use the official extractor.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -28,12 +29,13 @@ struct Entry {
     compressed: usize,
     expanded: usize,
     compression: u8,
+    directory: bool,
 }
 
 pub struct Archive {
     file: Mutex<File>,
     length: u64,
-    entries: HashMap<u64, Entry>,
+    entries: HashMap<u64, Option<Entry>>,
 }
 
 fn u32_at(bytes: &[u8], offset: usize) -> Result<u32> {
@@ -153,7 +155,7 @@ impl Archive {
             for word in first..end {
                 let descriptor = u32_at(&metadata, word * 4)?;
                 let kind = descriptor >> 24;
-                if kind & 0x80 == 0 {
+                if !matches!(kind, 0x80 | 0x81) {
                     continue;
                 }
                 if payload.is_some() {
@@ -176,14 +178,13 @@ impl Archive {
                     compressed,
                     expanded: (expanded_word & 0x0fff_ffff) as usize,
                     compression: ((compressed_word >> 24) & 0xf0) as u8,
+                    directory: kind == 0x81,
                 });
             }
             // Resource-only metadata (such as a texture descriptor) need not
             // represent a plain file. Localization always has one data part.
-            if let Some(payload) = payload {
-                if entries.insert(hash, payload).is_some() {
-                    return Err("Duplicate HashFS path hash".into());
-                }
+            if entries.insert(hash, payload).is_some() {
+                return Err("Duplicate HashFS path hash".into());
             }
         }
         Ok(Self {
@@ -195,20 +196,23 @@ impl Archive {
 
     pub fn read(&self, path: &str) -> Result<Option<Vec<u8>>> {
         let path = path.strip_prefix('/').unwrap_or(path);
-        if path.is_empty()
-            || path.contains('\\')
+        if path.contains('\\')
             || path.contains('\0')
-            || path
-                .split('/')
-                .any(|part| part.is_empty() || part == "." || part == "..")
+            || (!path.is_empty()
+                && path
+                    .split('/')
+                    .any(|part| part.is_empty() || part == "." || part == ".."))
         {
             return Err("Invalid HashFS resource path".into());
         }
         let Some(entry) = self.entries.get(&cityhash::cityhash64(path.as_bytes())) else {
             return Ok(None);
         };
+        let entry = entry
+            .as_ref()
+            .ok_or("Unsupported HashFS resource metadata")?;
         if entry.expanded > MAX_PAYLOAD_BYTES || entry.compressed > MAX_PAYLOAD_BYTES {
-            return Err("HashFS localization payload exceeds limit".into());
+            return Err("HashFS payload exceeds limit".into());
         }
         if !matches!(entry.compression, 0 | 0x10) {
             return Err(format!(
@@ -238,6 +242,106 @@ impl Archive {
         };
         Ok(Some(data))
     }
+
+    fn directory(&self, path: &str) -> Result<Vec<(String, bool)>> {
+        let entry = self
+            .entries
+            .get(&cityhash::cityhash64(path.as_bytes()))
+            .and_then(Option::as_ref)
+            .ok_or("Missing or unsupported HashFS directory")?;
+        if !entry.directory {
+            return Err("HashFS directory has plain-file metadata".into());
+        }
+        let data = self.read(path)?.ok_or("Missing HashFS directory")?;
+        let count = u32_at(&data, 0)? as usize;
+        if count > MAX_ENTRIES {
+            return Err("HashFS directory entry count exceeds limit".into());
+        }
+        let lengths = data
+            .get(4..4usize.checked_add(count).ok_or("Directory size overflow")?)
+            .ok_or("Truncated HashFS directory lengths")?;
+        let mut offset = 4 + count;
+        let mut names = Vec::with_capacity(count);
+        let mut seen = std::collections::HashSet::new();
+        for length in lengths {
+            let end = offset + usize::from(*length);
+            let name = std::str::from_utf8(
+                data.get(offset..end)
+                    .ok_or("Truncated HashFS directory name")?,
+            )
+            .map_err(|_| "Invalid HashFS directory name")?;
+            let (name, directory) = name
+                .strip_prefix('/')
+                .map_or((name, false), |name| (name, true));
+            if name.is_empty()
+                || name == "."
+                || name == ".."
+                || name.contains(['/', '\\', ':', '\0'])
+                || name.ends_with(['.', ' '])
+                || !seen.insert(name.to_ascii_lowercase())
+            {
+                return Err("Unsafe or duplicate HashFS directory name".into());
+            }
+            names.push((name.to_owned(), directory));
+            offset = end;
+        }
+        if offset != data.len() {
+            return Err("Unexpected trailing HashFS directory data".into());
+        }
+        Ok(names)
+    }
+
+    /// Validate and return the complete selected trees in memory. A missing
+    /// listing, unsupported selected entry or inconsistent type aborts the fast
+    /// path; unrelated textures and model metadata are never decoded.
+    pub fn catalog_files(&self) -> Result<Vec<(String, Vec<u8>)>> {
+        let root = self.directory("")?;
+        let mut pending = Vec::new();
+        for (name, directory) in root {
+            if matches!(name.as_str(), "def" | "locale") {
+                if !directory {
+                    return Err("Catalog root is not a directory".into());
+                }
+                pending.push(name);
+            }
+        }
+        let mut files = Vec::new();
+        let mut bytes = 0usize;
+        let mut visited = 0usize;
+        while let Some(parent) = pending.pop() {
+            if parent.split('/').count() > 64 {
+                return Err("HashFS directory depth exceeds limit".into());
+            }
+            for (name, directory) in self.directory(&parent)? {
+                visited += 1;
+                if visited > MAX_ENTRIES {
+                    return Err("HashFS tree exceeds entry limit".into());
+                }
+                let path = format!("{parent}/{name}");
+                if directory {
+                    pending.push(path);
+                    continue;
+                }
+                let entry = self
+                    .entries
+                    .get(&cityhash::cityhash64(path.as_bytes()))
+                    .and_then(Option::as_ref)
+                    .ok_or("Missing or unsupported catalog file")?;
+                if entry.directory {
+                    return Err("Catalog file has directory metadata".into());
+                }
+                let data = self.read(&path)?.ok_or("Missing catalog file")?;
+                bytes = bytes
+                    .checked_add(data.len())
+                    .ok_or("Catalog size overflow")?;
+                if bytes > 512 * 1024 * 1024 {
+                    return Err("Catalog extraction exceeds size limit".into());
+                }
+                files.push((path, data));
+            }
+        }
+        Ok(files)
+    }
 }
 
 /// Decode the plaintext UTF-8/BOM files used by the verified locale archive.
@@ -257,7 +361,7 @@ pub fn decode_text(data: &[u8]) -> Result<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use flate2::{write::ZlibEncoder, Compression};
     use std::io::Write;
@@ -318,6 +422,103 @@ mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(bytes).unwrap();
         file
+    }
+
+    pub(crate) fn tree_fixture(files: &[(&str, u8, &[u8], u8)]) -> Vec<u8> {
+        let mut bytes = vec![0u8; 64];
+        let mut rows = Vec::new();
+        let mut metadata = Vec::<u32>::new();
+        for (path, kind, data, compression) in files {
+            while bytes.len() % 16 != 0 {
+                bytes.push(0);
+            }
+            let offset = bytes.len() / 16;
+            let payload = if *compression == 0x10 {
+                zlib(data)
+            } else {
+                data.to_vec()
+            };
+            bytes.extend_from_slice(&payload);
+            rows.extend_from_slice(&cityhash::cityhash64(path.as_bytes()).to_le_bytes());
+            rows.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
+            rows.extend_from_slice(&1u16.to_le_bytes());
+            rows.extend_from_slice(&0u16.to_le_bytes());
+            metadata.extend_from_slice(&[
+                ((*kind as u32) << 24) | (metadata.len() as u32 + 1),
+                payload.len() as u32 | ((*compression as u32) << 24),
+                data.len() as u32,
+                0,
+                offset as u32,
+            ]);
+        }
+        let entry_offset = bytes.len() as u64;
+        let rows = zlib(&rows);
+        bytes.extend_from_slice(&rows);
+        let meta_offset = bytes.len() as u64;
+        let raw: Vec<_> = metadata
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        let meta = zlib(&raw);
+        bytes.extend_from_slice(&meta);
+        bytes[..4].copy_from_slice(b"SCS#");
+        bytes[4..6].copy_from_slice(&2u16.to_le_bytes());
+        bytes[8..12].copy_from_slice(b"CITY");
+        for (offset, value) in [
+            (12, files.len()),
+            (16, rows.len()),
+            (20, metadata.len()),
+            (24, meta.len()),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&(value as u32).to_le_bytes());
+        }
+        bytes[28..36].copy_from_slice(&entry_offset.to_le_bytes());
+        bytes[36..44].copy_from_slice(&meta_offset.to_le_bytes());
+        bytes
+    }
+
+    pub(crate) fn listing(names: &[&str]) -> Vec<u8> {
+        let mut data = (names.len() as u32).to_le_bytes().to_vec();
+        data.extend(names.iter().map(|name| name.len() as u8));
+        for name in names {
+            data.extend_from_slice(name.as_bytes());
+        }
+        data
+    }
+
+    #[test]
+    fn selects_complete_definition_tree_and_ignores_texture_metadata() {
+        let root = listing(&["/def", "/material"]);
+        let def = listing(&["part.sii"]);
+        let pack = save_fixture(&tree_fixture(&[
+            ("", 0x81, &root, 0x10),
+            ("def", 0x81, &def, 0),
+            ("def/part.sii", 0x80, b"synthetic", 0x10),
+            ("material/texture.tobj", 0x82, b"unrelated resource", 0x30),
+        ]));
+        assert_eq!(
+            Archive::open(pack.path()).unwrap().catalog_files().unwrap(),
+            vec![("def/part.sii".into(), b"synthetic".to_vec())]
+        );
+        for (kind, compression, name) in [
+            (0x82, 0, "part.sii"),
+            (0x80, 0x30, "part.sii"),
+            (0x80, 0, "../escape.sii"),
+        ] {
+            let def = listing(&[name]);
+            let pack = save_fixture(&tree_fixture(&[
+                ("", 0x81, &root, 0),
+                ("def", 0x81, &def, 0),
+                ("def/part.sii", kind, b"x", compression),
+            ]));
+            assert!(Archive::open(pack.path()).unwrap().catalog_files().is_err());
+        }
+        let def = listing(&["missing.sii"]);
+        let pack = save_fixture(&tree_fixture(&[
+            ("", 0x81, &root, 0),
+            ("def", 0x81, &def, 0),
+        ]));
+        assert!(Archive::open(pack.path()).unwrap().catalog_files().is_err());
     }
 
     #[test]

@@ -153,3 +153,26 @@
   justify-content: space-between;
   font-size: 11px;
 }
+
+label.save-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+label.save-filter input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.save-filter span {
+  opacity: 0.65;
+}
+.opened-save {
+  margin: 6px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

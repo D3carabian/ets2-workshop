@@ -10,6 +10,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     process::Command,
+    sync::OnceLock,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -113,12 +114,67 @@ fn values(u: &crate::sii::Unit, key: &str) -> Vec<String> {
         .map(|f| unquote(&f.value))
         .collect()
 }
+pub(crate) type MemorySources = HashMap<PathBuf, BTreeMap<String, Vec<u8>>>;
+
+fn include_regex() -> &'static regex::Regex {
+    static INCLUDE: OnceLock<regex::Regex> = OnceLock::new();
+    INCLUDE.get_or_init(|| regex::Regex::new(r#"(?m)^\s*@include\s+"([^"]+)"[^\r\n]*"#).unwrap())
+}
+
+fn definition_include_path(path: &str, relative: &str) -> Result<String> {
+    let joined = if relative.starts_with('/') {
+        relative.trim_start_matches('/').to_owned()
+    } else {
+        format!(
+            "{}/{}",
+            path.rsplit_once('/')
+                .map(|(parent, _)| parent)
+                .unwrap_or(""),
+            relative
+        )
+    };
+    let mut components = Vec::new();
+    for part in joined.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                components.pop().ok_or("include 超出资源目录")?;
+            }
+            _ if part.contains(['\\', ':', '\0']) => return Err("无效定义引用".into()),
+            _ => components.push(part),
+        }
+    }
+    Ok(components.join("/"))
+}
+
+fn expand_memory(path: &str, files: &BTreeMap<String, Vec<u8>>, depth: usize) -> Result<String> {
+    if depth > 16 {
+        return Err("定义 include 过深".into());
+    }
+    let text = std::str::from_utf8(
+        files
+            .get(path)
+            .ok_or_else(|| format!("缺少定义引用 {path}"))?,
+    )
+    .map_err(|error| error.to_string())?;
+    let mut out = String::new();
+    let mut end = 0;
+    for cap in include_regex().captures_iter(text) {
+        let matched = cap.get(0).unwrap();
+        out.push_str(&text[end..matched.start()]);
+        let child = definition_include_path(path, &cap[1])?;
+        out.push_str(&expand_memory(&child, files, depth + 1)?);
+        end = matched.end();
+    }
+    out.push_str(&text[end..]);
+    Ok(out)
+}
 fn expand(path: &Path, root: &Path, depth: usize) -> Result<String> {
     if depth > 16 {
         return Err("定义 include 过深".into());
     }
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let re = regex::Regex::new(r#"(?m)^\s*@include\s+"([^"]+)"[^\r\n]*"#).unwrap();
+    let re = include_regex();
     let mut out = String::new();
     let mut end = 0;
     for cap in re.captures_iter(&text) {
@@ -139,6 +195,45 @@ fn expand(path: &Path, root: &Path, depth: usize) -> Result<String> {
     }
     out.push_str(&text[end..]);
     Ok(out)
+}
+
+fn archive_source(pack: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let archive = crate::game_archive::Archive::open(pack)?;
+    let mut files: BTreeMap<_, _> = archive.catalog_files()?.into_iter().collect();
+    // Definitions can include files outside def/. Fetch those exact references
+    // too, preserving the official extractor's complete-archive semantics.
+    let mut pending: Vec<_> = files
+        .keys()
+        .filter(|path| path.ends_with(".sii") || path.ends_with(".sui"))
+        .cloned()
+        .collect();
+    let mut attempted = std::collections::HashSet::new();
+    let mut bytes: usize = files.values().map(Vec::len).sum();
+    while let Some(path) = pending.pop() {
+        let Ok(text) = std::str::from_utf8(&files[&path]) else {
+            continue;
+        };
+        let includes = include_regex()
+            .captures_iter(text)
+            .map(|cap| definition_include_path(&path, &cap[1]))
+            .collect::<Result<Vec<_>>>()?;
+        for child in includes {
+            if files.contains_key(&child) || !attempted.insert(child.clone()) {
+                continue;
+            }
+            if let Some(data) = archive.read(&child)? {
+                bytes = bytes
+                    .checked_add(data.len())
+                    .ok_or("Catalog size overflow")?;
+                if bytes > 512 * 1024 * 1024 {
+                    return Err("Catalog extraction exceeds size limit".into());
+                }
+                files.insert(child.clone(), data);
+                pending.push(child);
+            }
+        }
+    }
+    Ok(files)
 }
 impl Catalog {
     pub fn fresh(&self) -> Result<()> {
@@ -163,34 +258,56 @@ impl Catalog {
         roots: &[(PathBuf, String)],
         languages: &crate::localization::Languages,
     ) -> Result<Self> {
+        Self::scan_sources(roots, languages, &HashMap::new())
+    }
+    fn scan_sources(
+        roots: &[(PathBuf, String)],
+        languages: &crate::localization::Languages,
+        memory: &MemorySources,
+    ) -> Result<Self> {
         let mut out = Self::default();
         let mut sig = String::new();
         let mut appearances = HashMap::<String, Vec<Option<String>>>::new();
         for (root, label) in roots {
-            let def = root.join("def/vehicle");
-            if !def.exists() {
-                continue;
-            }
-            for e in walkdir::WalkDir::new(&def)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if !e.file_type().is_file()
-                    || e.path().extension().and_then(|s| s.to_str()) != Some("sii")
-                {
+            let inputs: Vec<(String, Result<String>)> = if let Some(files) = memory.get(root) {
+                files
+                    .keys()
+                    .filter(|path| path.starts_with("def/vehicle/") && path.ends_with(".sii"))
+                    .map(|path| (format!("/{path}"), expand_memory(path, files, 0)))
+                    .collect()
+            } else {
+                let def = root.join("def/vehicle");
+                if !def.exists() {
                     continue;
                 }
-                let path = format!(
-                    "/{}",
-                    e.path()
-                        .strip_prefix(root)
-                        .unwrap()
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                );
-                let text = match expand(e.path(), root, 0) {
-                    Ok(t) => t,
+                walkdir::WalkDir::new(&def)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_map(|entry| entry.ok())
+                    .filter(|entry| {
+                        entry.file_type().is_file()
+                            && entry.path().extension().and_then(|name| name.to_str())
+                                == Some("sii")
+                    })
+                    .map(|entry| {
+                        (
+                            format!(
+                                "/{}",
+                                entry
+                                    .path()
+                                    .strip_prefix(root)
+                                    .unwrap()
+                                    .to_string_lossy()
+                                    .replace('\\', "/")
+                            ),
+                            expand(entry.path(), root, 0),
+                        )
+                    })
+                    .collect()
+            };
+            for (path, text) in inputs {
+                let text = match text {
+                    Ok(text) => text,
                     Err(_) => continue,
                 };
                 let doc = match Document::parse(text) {
@@ -238,7 +355,7 @@ impl Catalog {
                 let name = if let Some(english) = names.get("en") {
                     english.clone()
                 } else if raw_name.is_empty() || raw_name.contains("@@") {
-                    e.path()
+                    Path::new(&path)
                         .file_stem()
                         .unwrap()
                         .to_string_lossy()
@@ -360,10 +477,7 @@ impl Catalog {
         Ok(out)
     }
 }
-pub fn build(game: &Path, extractor: &Path, cache: &Path) -> Result<Catalog> {
-    if !extractor.is_file() {
-        return Err("请选择 scs_extractor.exe".into());
-    }
+fn game_packs(game: &Path) -> Result<Vec<PathBuf>> {
     let base = game.join("def.scs");
     if !base.is_file() {
         return Err("游戏目录缺少 def.scs".into());
@@ -384,9 +498,86 @@ pub fn build(game: &Path, extractor: &Path, cache: &Path) -> Result<Catalog> {
         .collect();
     dlcs.sort();
     packs.extend(dlcs);
+    Ok(packs)
+}
+
+// Separate from the public catalog schema: parser/selection changes explicitly
+// invalidate this rebuild cache without making existing catalogs unreadable.
+const BUILD_CACHE_VERSION: u32 = 1;
+#[derive(Serialize, Deserialize)]
+struct BuildCache {
+    version: u32,
+    fingerprint: String,
+    catalog: Catalog,
+}
+
+fn build_fingerprint(game: &Path, packs: &[PathBuf]) -> Result<String> {
+    let mut inputs = Vec::new();
+    for path in packs
+        .iter()
+        .chain(std::iter::once(&game.join("locale.scs")))
+    {
+        let meta = match std::fs::metadata(path) {
+            Ok(meta) => meta,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && path.file_name().is_some_and(|name| name == "locale.scs") =>
+            {
+                inputs.push(format!("{}:missing", path.display()));
+                continue;
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        let modified = meta.modified().map_err(|error| error.to_string())?;
+        inputs.push(format!(
+            "{}:{}:{modified:?}",
+            path.canonicalize()
+                .map_err(|error| error.to_string())?
+                .display(),
+            meta.len()
+        ));
+    }
+    Ok(hash(inputs.join("\n").as_bytes()))
+}
+
+pub fn build(game: &Path, extractor: &Path, cache: &Path) -> Result<Catalog> {
+    build_with_progress(game, extractor, cache, &|_| {})
+}
+
+pub fn build_with_progress(
+    game: &Path,
+    extractor: &Path,
+    cache: &Path,
+    progress: &dyn Fn(&str),
+) -> Result<Catalog> {
+    if !extractor.is_file() {
+        return Err("请选择 scs_extractor.exe".into());
+    }
+    let packs = game_packs(game)?;
+    let fingerprint = build_fingerprint(game, &packs)?;
+    let cache_file = cache.join("parts-build-cache-v1.json");
+    if let Some(cached) = std::fs::read(&cache_file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<BuildCache>(&bytes).ok())
+    {
+        if cached.version == BUILD_CACHE_VERSION
+            && cached.fingerprint == fingerprint
+            && !cached.catalog.definitions.is_empty()
+        {
+            progress("游戏资源未变化，复用已建立的配件目录");
+            return Ok(cached.catalog);
+        }
+    }
     let mut roots = Vec::new();
+    let mut memory = MemorySources::new();
     let mut archives = Vec::new();
-    for pack in packs {
+    for (index, pack) in packs.iter().enumerate() {
+        progress(&format!(
+            "准备游戏定义 {}/{}：{}",
+            index + 1,
+            packs.len(),
+            pack.file_name().unwrap().to_string_lossy()
+        ));
         let meta = std::fs::metadata(&pack).map_err(|e| e.to_string())?;
         archives.push((
             pack.to_string_lossy().into(),
@@ -405,14 +596,32 @@ pub fn build(game: &Path, extractor: &Path, cache: &Path) -> Result<Catalog> {
         let key = hash(format!("{}:{}:{:?}", stable_path, meta.len(), meta.modified()).as_bytes());
         let root = cache.join("extracted").join(&key[..16]);
         if !root.join(".complete").exists() {
+            match archive_source(pack) {
+                Ok(files) => {
+                    memory.insert(root.clone(), files);
+                    if pack.file_name().is_some_and(|name| name == "def.scs") {
+                        Catalog::scan_sources(
+                            &[(root.clone(), "def.scs".into())],
+                            &crate::localization::Languages::new(),
+                            &memory,
+                        )?;
+                    }
+                    roots.push((root, pack.file_name().unwrap().to_string_lossy().into()));
+                    continue;
+                }
+                Err(error) => progress(&format!(
+                    "{} 使用官方解包器（{error}）",
+                    pack.file_name().unwrap().to_string_lossy()
+                )),
+            }
             // The official extractor interprets non-ASCII command-line paths incorrectly.
             // Use ASCII relative arguments inside an isolated staging directory instead.
             let stage = root.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
             std::fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
             let extraction = (|| -> Result<()> {
                 let input = stage.join("input.scs");
-                if std::fs::hard_link(&pack, &input).is_err() {
-                    std::fs::copy(&pack, &input).map_err(|e| e.to_string())?;
+                if std::fs::hard_link(pack, &input).is_err() {
+                    std::fs::copy(pack, &input).map_err(|e| e.to_string())?;
                 }
                 let mut cmd = Command::new(extractor.canonicalize().map_err(|e| e.to_string())?);
                 cmd.current_dir(&stage).arg("input.scs").arg("output");
@@ -443,8 +652,9 @@ pub fn build(game: &Path, extractor: &Path, cache: &Path) -> Result<Catalog> {
         }
         roots.push((root, pack.file_name().unwrap().to_string_lossy().into()));
     }
-    let (languages, name_warnings) = crate::localization::load(game, &roots);
-    let mut catalog = Catalog::scan_localized(&roots, &languages)?;
+    progress("读取游戏中英文文本与配件属性");
+    let (languages, name_warnings) = crate::localization::load_sources(game, &roots, &memory);
+    let mut catalog = Catalog::scan_sources(&roots, &languages, &memory)?;
     catalog.name_schema = u32::from(
         languages.get("en").is_some_and(|words| !words.is_empty())
             && languages
@@ -468,12 +678,205 @@ pub fn build(game: &Path, extractor: &Path, cache: &Path) -> Result<Catalog> {
     catalog.warnings.push(
         "目录包含本体与已识别的官方车型/配件 DLC；Mod 覆盖顺序未导入。未知配件仅供查看。".into(),
     );
+    if fingerprint != build_fingerprint(game, &game_packs(game)?)? {
+        return Err("建立目录期间游戏资源发生变化，请等待游戏更新完成后重试".into());
+    }
+    std::fs::create_dir_all(cache).map_err(|error| error.to_string())?;
+    crate::setup::write_atomic(
+        &cache_file,
+        &serde_json::to_vec(&BuildCache {
+            version: BUILD_CACHE_VERSION,
+            fingerprint,
+            catalog: catalog.clone(),
+        })
+        .map_err(|error| error.to_string())?,
+    )?;
     Ok(catalog)
 }
 
 #[cfg(test)]
 mod name_tests {
     use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn memory_sources_preserve_external_includes_and_localized_overrides() {
+        use crate::game_archive::tests::{listing, tree_fixture};
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let files = BTreeMap::<String, Vec<u8>>::from([
+            ("def/vehicle/engine.sii".into(), b"SiiNunit {\naccessory_engine_data : .test {\n@include \"/shared/engine.inc\"\n}\n}\n".to_vec()),
+            ("shared/engine.inc".into(), b"name: \"@@test@@\"\n@include \"../parameters/torque.inc\"\n".to_vec()),
+            ("parameters/torque.inc".into(), b"torque: 2500\n".to_vec()),
+            ("locale/en_gb/local.test.sii".into(), b"SiiNunit {\nlocalization_db : .l {\nkey[]: \"test\"\nval[]: \"DLC engine\"\n}\n}\n".to_vec()),
+        ]);
+        for (path, bytes) in &files {
+            let target = root.join(path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, bytes).unwrap();
+        }
+        let root_listing = listing(&["/def", "/locale"]);
+        let def_listing = listing(&["/vehicle"]);
+        let vehicle_listing = listing(&["engine.sii"]);
+        let locale_listing = listing(&["/en_gb"]);
+        let language_listing = listing(&["local.test.sii"]);
+        let mut entries = vec![
+            ("", 0x81, root_listing.as_slice(), 0),
+            ("def", 0x81, def_listing.as_slice(), 0),
+            ("def/vehicle", 0x81, vehicle_listing.as_slice(), 0),
+            ("locale", 0x81, locale_listing.as_slice(), 0),
+            ("locale/en_gb", 0x81, language_listing.as_slice(), 0),
+        ];
+        entries.extend(
+            files
+                .iter()
+                .map(|(path, data)| (path.as_str(), 0x80, data.as_slice(), 0x10)),
+        );
+        let pack = tmp.path().join("def.scs");
+        std::fs::write(&pack, tree_fixture(&entries)).unwrap();
+        let extracted = archive_source(&pack).unwrap();
+        assert_eq!(
+            extracted, files,
+            "Includes outside listed definition/locale roots must still be read"
+        );
+        let roots = [(root.clone(), "fixture".into())];
+        let memory = HashMap::from([(root, extracted)]);
+        let (disk_languages, _) = crate::localization::load(tmp.path(), &roots);
+        let (memory_languages, _) = crate::localization::load_sources(tmp.path(), &roots, &memory);
+        assert_eq!(disk_languages, memory_languages);
+        let disk = Catalog::scan_localized(&roots, &disk_languages).unwrap();
+        let cached = Catalog::scan_sources(&roots, &memory_languages, &memory).unwrap();
+        assert_eq!(
+            serde_json::to_value(disk).unwrap(),
+            serde_json::to_value(cached).unwrap()
+        );
+        assert!(definition_include_path("def/engine.sii", "../../escape.sui").is_err());
+    }
+
+    #[test]
+    fn selective_build_cache_handles_hot_changed_added_removed_and_corrupt_inputs() {
+        use crate::game_archive::tests::{listing, tree_fixture};
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        let cache = tmp.path().join("cache");
+        std::fs::create_dir_all(&game).unwrap();
+        let extractor = tmp.path().join("unused-extractor.exe");
+        std::fs::write(&extractor, b"not executed on the supported fast path").unwrap();
+        let pack = |name: &str| {
+            let root = listing(&["/def"]);
+            let def = listing(&["/vehicle"]);
+            let vehicle = listing(&["engine.sii"]);
+            let text = format!(
+                "SiiNunit {{\naccessory_engine_data : .test {{\nname: \"{name}\"\n}}\n}}\n"
+            );
+            tree_fixture(&[
+                ("", 0x81, &root, 0x10),
+                ("def", 0x81, &def, 0),
+                ("def/vehicle", 0x81, &vehicle, 0),
+                ("def/vehicle/engine.sii", 0x80, text.as_bytes(), 0x10),
+            ])
+        };
+        std::fs::write(game.join("def.scs"), pack("first")).unwrap();
+        let cold = build(&game, &extractor, &cache).unwrap();
+        let key = "/def/vehicle/engine.sii";
+        assert_eq!(cold.definitions[key].name, "first");
+        let hot_messages = std::cell::RefCell::new(Vec::new());
+        let hot = build_with_progress(&game, &extractor, &cache, &|message| {
+            hot_messages.borrow_mut().push(message.to_owned())
+        })
+        .unwrap();
+        assert_eq!(hot.signature, cold.signature);
+        assert_eq!(hot_messages.borrow().len(), 1);
+        assert!(hot_messages.borrow()[0].contains("复用"));
+        std::fs::write(game.join("def.scs"), pack("changed name")).unwrap();
+        assert_eq!(
+            build(&game, &extractor, &cache).unwrap().definitions[key].name,
+            "changed name"
+        );
+        std::fs::write(game.join("dlc_daf.scs"), pack("DLC override")).unwrap();
+        assert_eq!(
+            build(&game, &extractor, &cache).unwrap().definitions[key].name,
+            "DLC override"
+        );
+        std::fs::remove_file(game.join("dlc_daf.scs")).unwrap();
+        std::fs::write(cache.join("parts-build-cache-v1.json"), b"broken cache").unwrap();
+        assert_eq!(
+            build(&game, &extractor, &cache).unwrap().definitions[key].name,
+            "changed name"
+        );
+        let before = build_fingerprint(&game, &game_packs(&game).unwrap()).unwrap();
+        std::fs::write(game.join("locale.scs"), b"new language archive").unwrap();
+        assert_ne!(
+            before,
+            build_fingerprint(&game, &game_packs(&game).unwrap()).unwrap()
+        );
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(game.join("def.scs"))
+            .unwrap();
+        let time = std::time::UNIX_EPOCH + std::time::Duration::new(1_000_000, 100);
+        file.set_times(std::fs::FileTimes::new().set_modified(time))
+            .unwrap();
+        let first = build_fingerprint(&game, &game_packs(&game).unwrap()).unwrap();
+        file.set_times(
+            std::fs::FileTimes::new().set_modified(time + std::time::Duration::from_nanos(500)),
+        )
+        .unwrap();
+        assert_ne!(
+            first,
+            build_fingerprint(&game, &game_packs(&game).unwrap()).unwrap(),
+            "Same-second changes must invalidate the build cache"
+        );
+    }
+
+    #[test]
+    #[ignore = "Requires installed game, extractor, and baseline JSON; isolated output only"]
+    fn installed_catalog_performance_and_equivalence() {
+        let game = PathBuf::from(std::env::var("ETS2_GAME_DIR").unwrap());
+        let extractor = PathBuf::from(std::env::var("ETS2_EXTRACTOR").unwrap());
+        let baseline = PathBuf::from(std::env::var("ETS2_BASELINE_CATALOG").unwrap());
+        let expected: Catalog = serde_json::from_slice(&std::fs::read(baseline).unwrap()).unwrap();
+        let output = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("verification/catalog-perf");
+        std::fs::create_dir_all(&output).unwrap();
+        let cache = tempfile::Builder::new()
+            .prefix("selective-")
+            .tempdir_in(&output)
+            .unwrap();
+        let started = Instant::now();
+        let cold = build_with_progress(&game, &extractor, cache.path(), &|message| {
+            eprintln!("{message}")
+        })
+        .unwrap();
+        let cold_seconds = started.elapsed().as_secs_f64();
+        let started = Instant::now();
+        let hot = build(&game, &extractor, cache.path()).unwrap();
+        let hot_seconds = started.elapsed().as_secs_f64();
+        assert_eq!(serde_json::to_value(&cold.definitions).unwrap(), serde_json::to_value(&expected.definitions).unwrap(), "Selective extraction must preserve every definition, translated name, metric and source");
+        assert_eq!(
+            serde_json::to_value(&cold).unwrap(),
+            serde_json::to_value(&hot).unwrap()
+        );
+        let mut files = 0u64;
+        let mut bytes = 0u64;
+        for entry in walkdir::WalkDir::new(cache.path().join("extracted"))
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.file_type().is_file())
+        {
+            files += 1;
+            bytes += entry.metadata().unwrap().len();
+        }
+        let result = serde_json::json!({"cold_seconds":cold_seconds,"hot_seconds":hot_seconds,"definitions":cold.definitions.len(),"extracted_files":files,"extracted_bytes":bytes,"all_definitions_equal":true});
+        eprintln!("{result}");
+        std::fs::write(
+            output.join("result.json"),
+            serde_json::to_vec_pretty(&result).unwrap(),
+        )
+        .unwrap();
+    }
     #[test]
     fn names_retain_raw_keys_and_do_not_fabricate_missing_translations() {
         let root = tempfile::tempdir().unwrap();

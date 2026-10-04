@@ -84,6 +84,7 @@ pub fn catalog_path(s: &Settings, data: &Path) -> PathBuf {
 }
 #[derive(Clone, Serialize)]
 pub struct SaveEntry {
+    pub is_autosave: bool,
     pub path: String,
     pub name: String,
     pub profile: String,

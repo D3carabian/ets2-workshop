@@ -3,6 +3,11 @@ export type TextValues = Record<string, string | number>;
 export const LANGUAGE_STORAGE_KEY = "ets2-workshop.language";
 
 const english: Record<string, string> = {
+  包含自动存档: "Include autosaves",
+  默认显示手动存档和快速存档:
+    "Manual saves and quicksaves are shown by default",
+  自动存档: "Autosave",
+  "当前已打开：{name}": "Currently open: {name}",
   驾驶室: "Cabin",
   底盘: "Chassis",
   发动机: "Engine",

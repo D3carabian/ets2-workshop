@@ -92,6 +92,14 @@ function Workshop() {
   const [showSetup, setShowSetup] = useState(false);
   const [firstSetup, setFirstSetup] = useState(false);
   const [saves, setSaves] = useState<SaveEntry[]>([]);
+  const [includeAutosaves, setIncludeAutosaves] = useState(() => {
+    try {
+      return localStorage.getItem("ets2-workshop.include-autosaves") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [openedSaveLabel, setOpenedSaveLabel] = useState("");
   const [savePath, setSavePath] = useState("");
   const [manualPath, setManualPath] = useState("");
   const [opened, setOpened] = useState<Opened | null>(null);
@@ -197,9 +205,14 @@ function Workshop() {
       setBusy("");
     }
   }
-  async function refresh(preferred?: string) {
-    const list = await rpc<SaveEntry[]>("discover");
+  async function refresh(preferred?: string, include = includeAutosaves) {
+    const list = await rpc<SaveEntry[]>("discover", {
+      include_autosaves: include,
+    });
     setSaves(list);
+    setVerifyPath(
+      (p) => list.find((s) => pathKey(s.path) === pathKey(p))?.path || "",
+    );
     setSavePath(
       (p) =>
         list.find((s) => pathKey(s.path) === pathKey(preferred || p))?.path ||
@@ -207,12 +220,44 @@ function Workshop() {
         "",
     );
   }
+  async function changeAutosaves(include: boolean) {
+    const previous = includeAutosaves;
+    setIncludeAutosaves(include);
+    try {
+      await refresh(undefined, include);
+    } catch (error) {
+      setIncludeAutosaves(previous);
+      throw error;
+    }
+    try {
+      localStorage.setItem("ets2-workshop.include-autosaves", String(include));
+    } catch {
+      /* Optional preference storage. */
+    }
+  }
+  const saveFilter = (
+    <label className="save-filter">
+      <input
+        type="checkbox"
+        checked={includeAutosaves}
+        onChange={(e) => {
+          const include = e.target.checked;
+          void task("刷新存档列表", () => changeAutosaves(include));
+        }}
+      />
+      {tr("包含自动存档")}
+      <span>{tr("默认显示手动存档和快速存档")}</span>
+    </label>
+  );
   async function open(path: string) {
     setOpened(null);
     setOperations([]);
     setPreview(null);
     const doc = await rpc<Opened>("open", { path });
     setOpened(doc);
+    setOpenedSaveLabel(
+      saves.find((s) => pathKey(s.path) === pathKey(path))?.name || path,
+    );
     setFleetQuery("");
     setFleetPage(
       Math.floor(
@@ -559,6 +604,7 @@ function Workshop() {
                     <option key={s.path} value={s.path}>
                       {s.name} · {new Date(s.modified * 1000).toLocaleString()}{" "}
                       · {s.profile}
+                      {s.is_autosave ? ` · ${tr("自动存档")}` : ""}
                     </option>
                   ))}
                 </select>
@@ -596,6 +642,12 @@ function Workshop() {
                   </div>
                 </details>
               </div>
+              {saveFilter}
+              {opened && (
+                <p className="opened-save">
+                  {tr("当前已打开：{name}", { name: openedSaveLabel })}
+                </p>
+              )}
               {opened?.warnings.map((w) => (
                 <div className="inline-warning" key={w}>
                   <CircleAlert size={15} />
@@ -1451,6 +1503,7 @@ function Workshop() {
                     ))}
                   </select>
                 </label>
+                {saveFilter}
                 <button onClick={() => task("刷新游戏存档", refresh)}>
                   {tr("刷新存档列表")}
                 </button>

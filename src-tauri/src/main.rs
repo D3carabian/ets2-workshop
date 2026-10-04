@@ -15,6 +15,7 @@ struct Engine {
     settings: Settings,
     catalog: Catalog,
     session: Option<Session>,
+    save_list_cache: workshop_core::discovery::SaveListCache,
 }
 type Shared = Arc<Mutex<Engine>>;
 fn field<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
@@ -39,6 +40,7 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
             engine.settings = s.clone();
             engine.catalog = c;
             engine.session = None;
+            engine.save_list_cache = Default::default();
             Ok(json!({"settings":s,"count":engine.catalog.definitions.len()}))
         }
         "settings" => {
@@ -53,10 +55,15 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
                 ));
             }
             storage::save_settings(&s)?;
+            engine.save_list_cache = Default::default();
             engine.settings = s;
             Ok(json!(true))
         }
-        "discover" => Ok(json!(storage::discover(&engine.settings)?)),
+        "discover" => Ok(json!(engine.save_list_cache.discover(
+            Path::new(&engine.settings.documents),
+            &workshop_core::discovery::DiscoveryInputs::from_host(),
+            v["include_autosaves"].as_bool().unwrap_or(true),
+        )?)),
         "open" => {
             engine.session = None;
             let s = Session::open(Path::new(field(&v, "path")?), &engine.settings)?;
@@ -91,10 +98,11 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
                 .to_string_lossy()
                 .into();
             let s = &engine.settings;
-            let c = workshop_core::catalog::build(
+            let c = workshop_core::catalog::build_with_progress(
                 Path::new(&s.game),
                 Path::new(&s.extractor),
                 &storage::app_dir(),
+                progress,
             )?;
             std::fs::create_dir_all(storage::app_dir()).map_err(|e| e.to_string())?;
             std::fs::write(
@@ -164,6 +172,7 @@ fn main() {
         settings,
         catalog,
         session: None,
+        save_list_cache: Default::default(),
     }));
     tauri::Builder::default()
         .manage(engine)

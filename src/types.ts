@@ -48,6 +48,7 @@ export type Opened = {
   warnings: string[];
 };
 export type SaveEntry = {
+  is_autosave?: boolean;
   path: string;
   name: string;
   profile: string;

@@ -1,6 +1,6 @@
 use crate::Result;
 use regex::Regex;
-use std::{collections::HashMap, ops::Range};
+use std::{collections::HashMap, ops::Range, sync::OnceLock};
 
 #[derive(Debug, Clone)]
 pub struct Field {
@@ -177,9 +177,11 @@ impl Document {
         if tok.len() < 3 || tok[0].v != "SiiNunit" || tok[1].v != "{" {
             return Err("不是明文 SII 存档".into());
         }
-        let field_re =
+        static FIELD_RE: OnceLock<Regex> = OnceLock::new();
+        let field_re = FIELD_RE.get_or_init(|| {
             Regex::new(r"(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]*\])?):[ \t]*([^\r\n]*)")
-                .unwrap();
+                .unwrap()
+        });
         let mut i = 2;
         let mut units = Vec::new();
         let mut index = HashMap::new();

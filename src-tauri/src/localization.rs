@@ -130,6 +130,14 @@ fn expand(
 
 /// Read only the installed game's en_gb and zh_cn locale trees; no network or save access.
 pub fn load(game: &Path, roots: &[(PathBuf, String)]) -> (Languages, Vec<String>) {
+    load_sources(game, roots, &crate::catalog::MemorySources::new())
+}
+
+pub(crate) fn load_sources(
+    game: &Path,
+    roots: &[(PathBuf, String)],
+    memory: &crate::catalog::MemorySources,
+) -> (Languages, Vec<String>) {
     let mut languages = Languages::from([
         ("en".into(), Dictionary::new()),
         ("zh_cn".into(), Dictionary::new()),
@@ -171,18 +179,41 @@ pub fn load(game: &Path, roots: &[(PathBuf, String)]) -> (Languages, Vec<String>
             read_into(&format!("locale/{directory}/{filename}"), &archive_read);
         }
         for (root, _) in roots {
-            let Ok(entries) = std::fs::read_dir(root.join("locale").join(directory)) else {
-                continue;
+            let mut files: Vec<_> = if let Some(entries) = memory.get(root) {
+                let prefix = format!("locale/{directory}/");
+                entries
+                    .keys()
+                    .filter_map(|path| path.strip_prefix(&prefix))
+                    .filter(|name| {
+                        !name.contains('/') && name.starts_with("local") && name.ends_with(".sii")
+                    })
+                    .map(str::to_owned)
+                    .collect()
+            } else {
+                let Ok(entries) = std::fs::read_dir(root.join("locale").join(directory)) else {
+                    continue;
+                };
+                entries
+                    .flatten()
+                    .filter_map(|entry| {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        (name.starts_with("local") && name.ends_with(".sii")).then_some(name)
+                    })
+                    .collect()
             };
-            let mut files: Vec<_> = entries
-                .flatten()
-                .filter_map(|entry| {
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    (name.starts_with("local") && name.ends_with(".sii")).then_some(name)
-                })
-                .collect();
             files.sort();
             let local_read = |path: &str| -> Result<Option<String>> {
+                if let Some(entries) = memory.get(root) {
+                    return match entries.get(path) {
+                        Some(bytes) => {
+                            if bytes.len() > 16 * 1024 * 1024 {
+                                return Err("语言文件过大".into());
+                            }
+                            crate::game_archive::decode_text(bytes).map(Some)
+                        }
+                        None => archive_read(path),
+                    };
+                }
                 let file = root.join(path);
                 if !file.exists() {
                     return archive_read(path);

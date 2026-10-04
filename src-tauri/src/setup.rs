@@ -153,7 +153,9 @@ pub fn prepare(
         &app_dir(),
         progress,
         || ensure_extractor(progress),
-        crate::catalog::build,
+        |game, extractor, cache| {
+            crate::catalog::build_with_progress(game, extractor, cache, progress)
+        },
     )
 }
 fn prepare_with(
