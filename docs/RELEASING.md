@@ -19,7 +19,7 @@ Node 选择顺序为：显式 `-NodeDirectory`，否则依次寻找 PATH 中可�
 从当前源码复现干净 Windows 检出（包括尚未提交且未被忽略的修复）：
 
 ```powershell
-./scripts/verify-clean-checkout.ps1 -ExpectedTag v0.2.1
+./scripts/verify-clean-checkout.ps1 -ExpectedTag v0.3.0
 ```
 
 该脚本使用独立 Git 索引和 Windows 换行规则，在空目录执行 `-CheckOnly` 与完整构建，再用此次构建的 CLI 解码两份合成样本。它不修改当前索引或分支，不复制旧依赖目录或成品，最终仅保留验证后的 ZIP 和校验文件，清理临时检出。也支持 `-NodeDirectory`；版本变化后应使用对应标签。
@@ -33,7 +33,7 @@ Node 选择顺序为：显式 `-NodeDirectory`，否则依次寻找 PATH 中可�
 - `THIRD_PARTY_NOTICES.md`
 - `licenses/` 中的许可文本
 
-第三方声明或许可文本缺失时，打包失败。解码器随程序编译，官方解包器由首次配置流程下载；用户首次建目录需要联网。
+第三方声明或许可文本缺失时，打包失败。解码器随程序编译，官方解包器仅在归档需要回退解包时下载并校验；原生读取和有效缓存不要求联网。
 
 ## GitHub Actions
 
@@ -47,7 +47,7 @@ ZIP 检查限定入口、说明、许可清单及其声明的文件，核验许�
 
 1. 同步 `package.json`、`package-lock.json`（包括根 package）、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 的版本，更新 Cargo.lock，并提交所有改动。
 2. 核对第三方声明、许可、支持范围和变更说明。在本机运行完整构建。
-3. 创建并推送与版本一致的标签，例如 `v0.1.0`。标签与清单不匹配将导致打包失败。
+3. 创建并推送与版本一致的标签，例如 `v0.3.0`。标签与清单不匹配将导致打包失败。
 4. 检查 Actions 完成、下载 Release ZIP、核对 SHA-256，并在没有旧设置的 Windows 用户环境中测试首次向导。
 
 包含 `-` 的版本标签发布为 prerelease。同一标签重新执行流程会替换同名附件，因此应保持标签不可变，修复使用新版本号。构建失败不会运行发布步骤。不要提交真实存档或本机缓存。

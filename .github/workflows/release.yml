@@ -67,7 +67,10 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:RELEASE_TAG $zip "$zip.sha256" --clobber
           } else {
-            $releaseArgs = @('release', 'create', $env:RELEASE_TAG, $zip, "$zip.sha256", '--verify-tag', '--title', "ETS2 Workshop $env:RELEASE_TAG", '--generate-notes')
+            $releaseArgs = @('release', 'create', $env:RELEASE_TAG, $zip, "$zip.sha256", '--verify-tag', '--title', "ETS2 Workshop $env:RELEASE_TAG")
+            $notes = "docs/releases/$($env:RELEASE_TAG).md"
+            if (Test-Path -LiteralPath $notes) { $releaseArgs += @('--notes-file', $notes) }
+            else { $releaseArgs += '--generate-notes' }
             if ($version.Contains('-')) { $releaseArgs += '--prerelease' }
             gh @releaseArgs
           }
