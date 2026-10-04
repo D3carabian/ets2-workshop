@@ -4,13 +4,98 @@ use crate::{
     Result,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::OnceLock,
 };
 
 pub type Dictionary = BTreeMap<String, String>;
 pub type Languages = BTreeMap<String, Dictionary>;
+
+// Independent of accessory parser freshness: older catalogs remain editable.
+pub const DRIVER_NAMES_SCHEMA: u32 = 1;
+
+pub fn parse_driver_names(text: &str) -> Result<HashMap<String, String>> {
+    let doc = Document::parse(text.trim_start_matches('\u{feff}').to_owned())?;
+    let mut names = HashMap::new();
+    let mut found = false;
+    for unit in doc.units.iter().filter(|unit| unit.kind == "driver_names") {
+        found = true;
+        for field in &unit.fields {
+            let Some(index) = field
+                .key
+                .strip_prefix("name[")
+                .and_then(|s| s.strip_suffix(']'))
+            else {
+                continue;
+            };
+            if index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err("驾驶员姓名缺少明确的数字索引".into());
+            }
+            let index = index.parse::<u32>().map_err(|_| "驾驶员姓名索引过大")?;
+            let name = unquote(&field.value)
+                .trim_start_matches('+')
+                .trim()
+                .to_owned();
+            if name.is_empty() || names.len() >= 100_000 {
+                return Err("驾驶员姓名为空或数量超限".into());
+            }
+            if names.insert(format!("driver.{index}"), name).is_some() {
+                return Err("驾驶员姓名存在重复索引".into());
+            }
+        }
+    }
+    if !found || names.is_empty() {
+        return Err("未找到有效的驾驶员姓名表".into());
+    }
+    Ok(names)
+}
+
+/// Read game-owned names only while building the catalog, never per save/truck.
+pub(crate) fn load_driver_names(
+    game: &Path,
+    sources: &[crate::catalog::Source],
+) -> (HashMap<String, String>, Vec<String>, bool) {
+    let loaded = (|| -> Result<HashMap<String, String>> {
+        let locale = game.join("locale.scs");
+        let archive = match std::fs::metadata(&locale) {
+            Ok(_) => Some(crate::game_archive::Archive::open(&locale)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.to_string()),
+        };
+        let read = |path: &str| -> Result<Option<String>> {
+            for source in sources.iter().rev() {
+                if let Some(bytes) = source.read(path, 16 * 1024 * 1024)? {
+                    return crate::game_archive::decode_text(&bytes).map(Some);
+                }
+            }
+            archive
+                .as_ref()
+                .map(|archive| archive.read(path))
+                .transpose()?
+                .flatten()
+                .map(|bytes| crate::game_archive::decode_text(&bytes))
+                .transpose()
+        };
+        match expand(
+            "locale/en_gb/driver_names.sii",
+            &read,
+            &mut Vec::new(),
+            &mut 0,
+        )? {
+            Some(text) => parse_driver_names(&text),
+            None => Ok(HashMap::new()),
+        }
+    })();
+    match loaded {
+        Ok(names) => (names, Vec::new(), true),
+        Err(error) => (
+            HashMap::new(),
+            vec![format!("驾驶员姓名未读取，将显示编号：{error}")],
+            false,
+        ),
+    }
+}
 
 fn array(unit: &crate::sii::Unit, key: &str) -> Result<Vec<String>> {
     let anonymous = format!("{key}[]");
@@ -331,5 +416,72 @@ mod tests {
             languages["en"].len(),
             languages["zh_cn"].len()
         );
+    }
+}
+
+#[cfg(test)]
+mod driver_name_tests {
+    use super::*;
+
+    #[test]
+    fn names_use_explicit_decimal_indices_not_line_order() {
+        let names = parse_driver_names("\u{feff}SiiNunit {\ndriver_names : .names {\nname[12]: \"+Synthetic B\"\nname[00]: \"Synthetic \\\"A\\\"\"\n}\n}").unwrap();
+        assert_eq!(names["driver.12"], "Synthetic B");
+        assert_eq!(names["driver.0"], "Synthetic \"A\"");
+        assert_eq!(names.len(), 2);
+        for fields in [
+            "name[0]: \"A\"\nname[00]: \"B\"",
+            "name[]: \"A\"",
+            "name[-1]: \"A\"",
+            "name[1]: \"+\"",
+        ] {
+            assert!(parse_driver_names(&format!(
+                "SiiNunit {{\ndriver_names : .names {{\n{fields}\n}}\n}}"
+            ))
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn game_name_loading_handles_includes_missing_and_malformed_tables() {
+        let temp = tempfile::tempdir().unwrap();
+        let game = temp.path().join("game");
+        let root = temp.path().join("definitions");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(root.join("locale/en_gb")).unwrap();
+        let sources = crate::catalog::disk_sources(&[(root.clone(), "synthetic".into())]);
+        let (names, warnings, complete) = load_driver_names(&game, &sources);
+        assert!(complete && names.is_empty() && warnings.is_empty());
+        std::fs::write(
+            root.join("locale/en_gb/driver_names.sii"),
+            "SiiNunit {\ndriver_names : .names {\n@include \"drivers.sui\"\n}\n}",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("locale/en_gb/drivers.sui"),
+            "name[003]: \"+Synthetic Driver\"\n",
+        )
+        .unwrap();
+        let (names, warnings, complete) = load_driver_names(&game, &sources);
+        assert!(complete && warnings.is_empty());
+        assert_eq!(names["driver.3"], "Synthetic Driver");
+        std::fs::write(
+            root.join("locale/en_gb/drivers.sui"),
+            "name[3]: \"A\"\nname[03]: \"B\"\n",
+        )
+        .unwrap();
+        let (names, warnings, complete) = load_driver_names(&game, &sources);
+        assert!(!complete && names.is_empty() && warnings.len() == 1);
+    }
+
+    #[test]
+    #[ignore = "read-only installed game check; requires ETS2_DRIVER_GAME"]
+    fn installed_english_driver_names() {
+        let game = PathBuf::from(std::env::var("ETS2_DRIVER_GAME").unwrap());
+        let (names, warnings, complete) = load_driver_names(&game, &[]);
+        assert!(complete, "{warnings:?}");
+        assert!(names.len() >= 100);
+        assert!(names.contains_key("driver.0"));
+        eprintln!("Installed English driver names: {}", names.len());
     }
 }

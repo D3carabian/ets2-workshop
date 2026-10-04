@@ -214,17 +214,16 @@ main {
   min-width: 0;
 }
 header {
-  height: 68px;
+  height: 52px;
   background: #fafbf8;
   border-bottom: 1px solid #e0e6df;
   padding: 0 32px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   font-size: 12px;
   color: #77877c;
 }
-.breadcrumb,
 .header-right {
   display: flex;
   align-items: center;
@@ -238,14 +237,6 @@ header {
 }
 .header-right > span {
   white-space: nowrap;
-}
-.header-backup {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-.header-backup > svg {
-  flex-shrink: 0;
 }
 .chip {
   display: inline-flex;
@@ -295,6 +286,7 @@ header {
 }
 .savebar details {
   position: relative;
+  margin-top: 0;
   white-space: nowrap;
   font-size: 12px;
 }
@@ -432,6 +424,11 @@ header {
   padding: 9px 0;
   font-size: 12px;
   box-shadow: none;
+  margin-top: 0;
+  line-height: 1.5;
+}
+.search > svg {
+  flex-shrink: 0;
 }
 .filters .search {
   flex: 1;

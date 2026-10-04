@@ -56,6 +56,7 @@ import {
   candidateReason,
 } from "./parts";
 import { Metrics, Comparison } from "./PartMetrics";
+import { newSaveName, orderFleet } from "./garage";
 declare const __APP_VERSION__: string;
 const FLEET_PAGE_SIZE = 50;
 const pathKey = (path: string) =>
@@ -167,7 +168,7 @@ function Workshop() {
   const [verification, setVerification] = useState<Verification[]>([]);
   const [saveModal, setSaveModal] = useState(false);
   const [saveMode, setSaveMode] = useState("new");
-  const [newName, setNewName] = useState("workshop_test");
+  const [newName, setNewName] = useState<string | null>(null);
   const [restoreId, setRestoreId] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogFilter, setCatalogFilter] = useState("all");
@@ -253,20 +254,23 @@ function Workshop() {
     }
   }
   const saveFilter = (
-    <label className="save-filter">
-      <input
-        type="checkbox"
-        checked={includeAutosaves}
-        onChange={(e) => {
-          const include = e.target.checked;
-          void task("刷新存档列表", () => changeAutosaves(include));
-        }}
-      />
-      {tr("包含自动存档")}
+    <div className="save-filter">
+      <label>
+        <input
+          type="checkbox"
+          checked={includeAutosaves}
+          onChange={(e) => {
+            const include = e.target.checked;
+            void task("刷新存档列表", () => changeAutosaves(include));
+          }}
+        />
+        {tr("包含自动存档")}
+      </label>
       <span>{tr("默认显示手动存档和快速存档")}</span>
-    </label>
+    </div>
   );
   function clearEditor() {
+    setNewName(null);
     setLastBackup(null);
     setOpened(null);
     setOpenedSaveLabel("");
@@ -290,6 +294,7 @@ function Workshop() {
   }
   const changingGame = pathKey(settings.game) !== pathKey(savedGame);
   async function open(path: string) {
+    setNewName(null);
     setLastBackup(null);
     setOpened(null);
     setOperations([]);
@@ -300,17 +305,8 @@ function Workshop() {
       saves.find((s) => pathKey(s.path) === pathKey(path))?.name || path,
     );
     setFleetQuery("");
-    setFleetPage(
-      Math.floor(
-        Math.max(
-          0,
-          doc.trucks.findIndex((t) => t.current),
-        ) / FLEET_PAGE_SIZE,
-      ),
-    );
-    setTruckId(
-      doc.trucks.find((t) => t.current)?.id || doc.trucks[0]?.id || "",
-    );
+    setFleetPage(0);
+    setTruckId(orderFleet(doc.trucks)[0]?.id || "");
     setPartId("");
     setOperations([]);
     setPreview(null);
@@ -345,12 +341,15 @@ function Workshop() {
       await refresh();
     });
   }, []);
-  const trucks = preview?.trucks || opened?.trucks || [];
+  const trucks = useMemo(
+    () => orderFleet(preview?.trucks || opened?.trucks || []),
+    [preview?.trucks, opened?.trucks],
+  );
   const filteredTrucks = useMemo(() => {
     const query = fleetQuery.trim().toLowerCase();
     return query
       ? trucks.filter((t) =>
-          `${friendly(t.model)} ${t.plate} ${t.id}`
+          `${friendly(t.model)} ${t.plate} ${t.id} ${t.driver?.name || ""} ${t.driver?.id || ""}`
             .toLowerCase()
             .includes(query),
         )
@@ -438,7 +437,11 @@ function Workshop() {
     setCandidateQuery("");
   }
   async function stage() {
-    if (!truck || !selected || blockedReason) return;
+    if (!truck || !selected) return;
+    if (blockedReason) {
+      setNotice({ text: blockedReason, error: true });
+      return;
+    }
     const op: Operation = {
       truck_id: truck.id,
       action,
@@ -498,7 +501,8 @@ function Workshop() {
           (saveMode === "new"
             ? "已保存为 {name}。请在游戏中手动加载；备份已保留。"
             : "已保存。请在游戏中手动加载；备份已保留。");
-    const messageValues = { name: newName };
+    const messageValues = { name: newName || "" };
+    if (r.state === "completed") setNewName(null);
     try {
       setReceipts(await rpc<Receipt[]>("history"));
       await refresh(r.output);
@@ -568,20 +572,8 @@ function Workshop() {
       </aside>
       <main>
         <header>
-          <div className="breadcrumb">
-            ETS2 Workshop <ChevronRight size={14} />{" "}
-            {tr(tabs.find((t) => t[0] === page)?.[1] || "")}
-          </div>
           <div className="header-right">
             <LanguagePicker />
-            <span className="chip">
-              {count.toLocaleString()}
-              {tr("个配件定义")}
-            </span>
-            <span className="header-backup">
-              <ShieldCheck size={17} />
-              {tr("自动备份")}
-            </span>
           </div>
         </header>
         <fieldset disabled={!!busy} className="workspace">
@@ -654,7 +646,10 @@ function Workshop() {
                 <button
                   className="primary"
                   disabled={!operations.length}
-                  onClick={() => setSaveModal(true)}
+                  onClick={() => {
+                    setNewName((name) => name ?? newSaveName());
+                    setSaveModal(true);
+                  }}
                 >
                   <Save size={17} />
                   {tr("保存修改")}
@@ -796,7 +791,7 @@ function Workshop() {
                         <Search size={16} />
                         <input
                           aria-label={tr("搜索卡车")}
-                          placeholder={tr("车型、车牌或编号")}
+                          placeholder={tr("车型、车牌或驾驶员")}
                           value={fleetQuery}
                           onChange={(e) => {
                             setFleetQuery(e.target.value);
@@ -867,6 +862,20 @@ function Workshop() {
                               <div className="plate">
                                 {t.plate || tr("未设置车牌")}
                               </div>
+                              <span className="truck-driver">
+                                {t.current || t.driver?.kind === "player"
+                                  ? tr("驾驶员：玩家")
+                                  : t.driver?.kind === "employee"
+                                    ? tr("雇员：{name}", {
+                                        name:
+                                          t.driver.name ||
+                                          t.driver.id ||
+                                          tr("编号未知"),
+                                      })
+                                    : t.driver?.kind === "unassigned"
+                                      ? tr("未分配驾驶员")
+                                      : tr("驾驶员未识别")}
+                              </span>
                               <small>
                                 {t.accessories.length}
                                 {tr("个配件")} <ChevronRight size={13} />
@@ -1165,7 +1174,18 @@ function Workshop() {
                                     "candidate " +
                                     (chosen === c.key ? "selected" : "")
                                   }
-                                  onClick={() => setChosen(c.key)}
+                                  aria-pressed={chosen === c.key}
+                                  onClick={() => {
+                                    setChosen((key) =>
+                                      key === c.key ? "" : c.key,
+                                    );
+                                    setNotice((message) =>
+                                      message?.error &&
+                                      message.text === blockedReason
+                                        ? null
+                                        : message,
+                                    );
+                                  }}
                                 >
                                   <span>
                                     <strong>
@@ -1271,22 +1291,13 @@ function Workshop() {
                               </p>
                             )}
                           <button
-                            className="primary full"
-                            disabled={
-                              !selected ||
-                              !!blockedReason ||
-                              !!catalogRebuildReason
-                            }
+                            className="primary full stage-button"
+                            disabled={!selected || !!catalogRebuildReason}
                             onClick={() => task("校验改装规则", stage)}
                           >
                             <Plus size={16} />
                             {tr("加入变更清单")}
                           </button>
-                          <p className="micro">
-                            {tr(
-                              "发动机、变速箱、底盘等核心部件禁止重复追加。所有操作由后台再次校验。",
-                            )}
-                          </p>
                         </>
                       )}
                     </section>
@@ -1814,7 +1825,7 @@ function Workshop() {
                 {tr("新存档名称")}
                 <input
                   disabled={!!busy}
-                  value={newName}
+                  value={newName ?? ""}
                   onChange={(e) => setNewName(e.target.value)}
                   maxLength={80}
                 />

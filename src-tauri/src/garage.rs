@@ -25,6 +25,7 @@ pub struct Truck {
     pub plate: String,
     pub model: String,
     pub current: bool,
+    pub driver: crate::drivers::Driver,
     pub accessories: Vec<Accessory>,
     pub location: String,
 }
@@ -63,10 +64,11 @@ pub fn inventory(doc: &Document, catalog: &Catalog) -> Result<Vec<Truck>> {
             }
         }
     }
+    let drivers = crate::drivers::assignments(doc, &owned_set, &current, &catalog.driver_names);
     owned
         .iter()
         .map(|id| {
-            truck(
+            let mut truck = truck(
                 doc,
                 catalog,
                 id,
@@ -75,7 +77,9 @@ pub fn inventory(doc: &Document, catalog: &Catalog) -> Result<Vec<Truck>> {
                     .get(id.as_str())
                     .map(|v| v.join(", "))
                     .unwrap_or_default(),
-            )
+            )?;
+            truck.driver = drivers.get(id).cloned().unwrap_or_default();
+            Ok(truck)
         })
         .collect()
 }
@@ -135,6 +139,7 @@ pub(crate) fn truck(
         plate,
         model: truck_model,
         current,
+        driver: crate::drivers::Driver::default(),
         accessories,
         location: location.into(),
     })

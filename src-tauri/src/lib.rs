@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod decoder;
 pub mod discovery;
+pub mod drivers;
 pub mod edit;
 pub mod game_archive;
 pub mod garage;

@@ -14,13 +14,24 @@
   scrollbar-gutter: stable;
 }
 .garage-grid .fleet > .section-head {
-  align-items: baseline;
+  align-items: center;
   background: #f3f5f2;
   margin-bottom: 8px;
 }
 .garage-grid .fleet > .section-head > span {
   line-height: 1.5;
   white-space: nowrap;
+}
+.garage-grid .fleet > .section-head h2 {
+  line-height: 1.5;
+}
+.truck-driver {
+  display: block;
+  margin: 9px 0;
+  color: #627859;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .garage-grid .inspector {
   display: flex;
@@ -177,7 +188,10 @@
   font-size: 11px;
 }
 
-label.save-filter {
+.stage-button {
+  margin-top: 12px;
+}
+.save-filter {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -185,7 +199,15 @@ label.save-filter {
   margin: 8px 0;
   font-size: 12px;
 }
-label.save-filter input[type="checkbox"] {
+.save-filter > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.save-filter input[type="checkbox"] {
   width: 15px;
   height: 15px;
   margin: 0;

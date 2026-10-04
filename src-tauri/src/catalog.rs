@@ -36,6 +36,10 @@ pub struct Definition {
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Catalog {
+    #[serde(default)]
+    pub driver_names: HashMap<String, String>,
+    #[serde(default)]
+    pub driver_names_schema: u32,
     pub definitions: HashMap<String, Definition>,
     pub warnings: Vec<String>,
     pub signature: String,
@@ -734,6 +738,7 @@ pub fn build_lazy(
         .and_then(|bytes| serde_json::from_slice::<BuildCache>(&bytes).ok())
     {
         if cached.version == BUILD_CACHE_VERSION
+            && cached.catalog.driver_names_schema == crate::localization::DRIVER_NAMES_SCHEMA
             && cached.fingerprint == fingerprint
             && !cached.catalog.definitions.is_empty()
             && cached.catalog.fresh().is_ok()
@@ -839,6 +844,15 @@ pub fn build_lazy(
     let (languages, name_warnings) = crate::localization::load_sources(game, &sources);
     let cacheable_names = name_warnings.is_empty();
     let mut catalog = Catalog::scan_sources(&sources, &languages)?;
+    let (driver_names, driver_warnings, driver_names_complete) =
+        crate::localization::load_driver_names(game, &sources);
+    catalog.driver_names = driver_names;
+    catalog.driver_names_schema = if driver_names_complete {
+        crate::localization::DRIVER_NAMES_SCHEMA
+    } else {
+        0
+    };
+    catalog.warnings.extend(driver_warnings);
     catalog.name_schema = u32::from(
         languages.get("en").is_some_and(|words| !words.is_empty())
             && languages
@@ -874,7 +888,7 @@ pub fn build_lazy(
     }
     // A temporary language read failure must be retried by Build / update.
     // The partial result remains usable, but must not become a hot-cache hit.
-    if cacheable_names && catalog.scan_complete {
+    if cacheable_names && driver_names_complete && catalog.scan_complete {
         std::fs::create_dir_all(cache).map_err(|error| error.to_string())?;
         crate::setup::write_atomic(
             &cache_file,
@@ -1330,6 +1344,25 @@ mod name_tests {
         assert_eq!(hot_messages.borrow().len(), 1);
         assert!(hot_messages.borrow()[0].contains("复用"));
         let cache_path = cache.join("parts-build-cache-v1.json");
+        let mut without_names: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
+        without_names["catalog"]
+            .as_object_mut()
+            .unwrap()
+            .remove("driver_names");
+        without_names["catalog"]
+            .as_object_mut()
+            .unwrap()
+            .remove("driver_names_schema");
+        let legacy_names: Catalog =
+            serde_json::from_value(without_names["catalog"].clone()).unwrap();
+        legacy_names.fresh().unwrap(); // Names are optional, not a new editing restriction.
+        std::fs::write(&cache_path, serde_json::to_vec(&without_names).unwrap()).unwrap();
+        let refreshed_names = build(&game, &extractor, &cache).unwrap();
+        assert_eq!(
+            refreshed_names.driver_names_schema,
+            crate::localization::DRIVER_NAMES_SCHEMA
+        );
         let mut old: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
         old["version"] = serde_json::json!(1);

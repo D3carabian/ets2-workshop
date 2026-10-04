@@ -14,6 +14,12 @@ const english: Record<string, string> = {
   "请先保存或移除待保存修改，再更换游戏安装或重新配置":
     "Save or remove pending changes before switching the game installation or running setup again",
   包含自动存档: "Include autosaves",
+  "车型、车牌或驾驶员": "Model, plate or driver",
+  "驾驶员：玩家": "Driver: Player",
+  "雇员：{name}": "Employee: {name}",
+  编号未知: "Unknown ID",
+  未分配驾驶员: "No driver assigned",
+  驾驶员未识别: "Driver unidentified",
   默认显示手动存档和快速存档:
     "Manual saves and quicksaves are shown by default",
   自动存档: "Autosave",

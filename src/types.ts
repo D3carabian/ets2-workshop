@@ -39,6 +39,11 @@ export type Truck = {
   model: string;
   current: boolean;
   location: string;
+  driver: {
+    kind: "player" | "employee" | "unassigned" | "unknown";
+    id: string | null;
+    name: string | null;
+  };
   accessories: Accessory[];
 };
 export type Opened = {

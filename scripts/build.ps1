@@ -27,7 +27,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 if ($LASTEXITCODE) { throw 'Rust formatting check failed' }
 npm.cmd run build
 if ($LASTEXITCODE) { throw 'Frontend build failed' }
-node --test scripts/parts.test.mjs scripts/i18n.test.mjs
+node --test scripts/parts.test.mjs scripts/i18n.test.mjs scripts/garage.test.mjs
 if ($LASTEXITCODE) { throw 'Frontend rule tests failed' }
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 if ($LASTEXITCODE) { throw 'Tests failed' }

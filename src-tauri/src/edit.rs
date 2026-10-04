@@ -375,8 +375,9 @@ pub fn apply(
             position: location,
         });
         // Only this vehicle changes; later operations must see its updated definitions.
-        let updated =
+        let mut updated =
             crate::garage::truck(&result, catalog, &truck.id, truck.current, &truck.location)?;
+        updated.driver = truck.driver.clone();
         for &index in indices {
             trucks[index] = updated.clone();
         }
