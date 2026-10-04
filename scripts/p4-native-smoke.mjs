@@ -176,6 +176,91 @@ try {
   await page.getByLabel("配件类别", { exact: true }).selectOption("engine");
   await page.locator(".part-row").click();
   assert.equal(await page.locator(".candidate").count(), 50);
+  const packageVersion = JSON.parse(
+    await readFile(resolve("package.json"), "utf8"),
+  ).version;
+  assert.equal(
+    (await page.locator(".rail-bottom").innerText()).trim(),
+    `${packageVersion} / PUBLIC PREVIEW`,
+  );
+  assert.equal(await page.locator("footer").count(), 0);
+  assert(
+    await page
+      .locator(".brand-icon img")
+      .evaluate((img) => img.complete && img.naturalWidth === 256),
+    "Selected C logo loads from the packaged app",
+  );
+  assert.equal(await page.locator(".backup-status").count(), 0);
+  const layoutChecks = [];
+  for (const viewport of [
+    { width: 1080, height: 720 },
+    { width: 1440, height: 940 },
+    { width: 2560, height: 1392 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.locator(".inspector").evaluate((el) => (el.scrollTop = 0));
+    await delay(100);
+    const measure = await page.evaluate(() => {
+      const box = (selector) => {
+        const r = document.querySelector(selector).getBoundingClientRect();
+        return {
+          top: r.top,
+          bottom: r.bottom,
+          height: r.height,
+          center: r.top + r.height / 2,
+        };
+      };
+      return {
+        inspector: box(".inspector"),
+        last: box(".inspector > :last-child"),
+        candidates: box(".candidates"),
+        language: box(".header-right .language-picker select"),
+        chip: box(".header-right .chip"),
+        backup: box(".header-backup"),
+        fleetHeading: box(".fleet .section-head h2"),
+        fleetCount: box(".fleet .section-head > span"),
+      };
+    });
+    assert(
+      Math.abs(measure.language.center - measure.chip.center) < 2,
+      "Header controls vertically align",
+    );
+    assert(
+      Math.abs(measure.language.center - measure.backup.center) < 2,
+      "Backup label aligns with language",
+    );
+    assert(
+      Math.abs(measure.fleetHeading.bottom - measure.fleetCount.bottom) < 5,
+      "Fleet heading and count share a baseline",
+    );
+    if (viewport.height > 1000) {
+      assert(
+        measure.candidates.height > 350,
+        "Long candidate list uses the available height",
+      );
+      assert(
+        measure.inspector.bottom - measure.last.bottom < 32,
+        "No empty white tail in the inspector",
+      );
+    }
+    await page
+      .locator(".inspector")
+      .evaluate((el) => (el.scrollTop = el.scrollHeight));
+    const button = await page
+      .getByRole("button", { name: "加入变更清单", exact: true })
+      .boundingBox();
+    const panel = await page.locator(".inspector").boundingBox();
+    assert(
+      button.y >= panel.y &&
+        button.y + button.height <= panel.y + panel.height + 1,
+      "Stage button remains accessible at every size",
+    );
+    await page.locator(".inspector").evaluate((el) => (el.scrollTop = 0));
+    await page.screenshot({ path: join(root, `layout-${viewport.width}.png`) });
+    layoutChecks.push({ viewport, ...measure });
+  }
+  await page.setViewportSize({ width: 1440, height: 940 });
+
   assert.doesNotMatch(
     await page.locator(".candidates").innerText(),
     /未识别车型引擎/,
@@ -193,6 +278,15 @@ try {
   assert.equal(await page.locator(".candidate").count(), 1);
   assert.match(await page.locator(".candidate").innerText(), /游戏引擎乙/);
   await page.locator(".candidate").click();
+  await page
+    .locator(".inspector .backup-reminder")
+    .filter({ hasText: "保存时自动备份原存档" })
+    .waitFor();
+  assert.equal(
+    await page.locator(".backup-status").count(),
+    0,
+    "Selecting a part must not claim a backup exists",
+  );
   await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
   await page.waitForSelector(".changes .change");
   await page.getByLabel("语言 / Language", { exact: true }).selectOption("en");
@@ -228,6 +322,32 @@ try {
   );
   assert.equal(records.length, 1);
   assert(records[0].output.startsWith(root));
+  assert.equal(
+    await readFile(join(records[0].backup, "game.sii"), "utf8"),
+    text,
+  );
+  await page
+    .locator(".backup-status")
+    .filter({ hasText: "原存档已备份" })
+    .waitFor();
+  await page
+    .locator(".backup-status")
+    .getByRole("button", { name: "恢复此备份", exact: true })
+    .click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByRole("button", { name: "查看全部备份", exact: true }).click();
+  assert.equal(await page.locator(".history-list .history-restore").count(), 1);
+  assert.equal(
+    await page.locator(".history-verification").getAttribute("open"),
+    null,
+  );
+  await page.locator(".history-verification summary").click();
+  assert.match(
+    await page.locator(".history-verification").innerText(),
+    /不会恢复备份或修改存档/,
+  );
+  await page.screenshot({ path: join(root, "backups-and-checking.png") });
+
   assert.match(
     await readFile(records[0].output, "utf8"),
     new RegExp(b.path.replaceAll(".", "\\.")),
@@ -265,6 +385,8 @@ try {
         readOnlyReasons: true,
         languageStateAndSave: true,
         pageErrors: errors,
+        layoutChecks,
+        backupTimingAndEntrance: true,
       },
       null,
       2,

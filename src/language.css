@@ -4,11 +4,15 @@
   gap: 8px;
   font-size: 12px;
   margin: 0;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 .language-picker select {
   width: auto;
   min-width: 104px;
-  padding: 6px 8px;
+  margin-top: 0;
+  padding: 6px 36px 6px 10px;
+  line-height: inherit;
 }
 .onboarding > .language-picker {
   display: flex;

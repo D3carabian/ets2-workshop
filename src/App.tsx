@@ -56,6 +56,7 @@ import {
   candidateReason,
 } from "./parts";
 import { Metrics, Comparison } from "./PartMetrics";
+declare const __APP_VERSION__: string;
 const FLEET_PAGE_SIZE = 50;
 const pathKey = (path: string) =>
   path
@@ -160,7 +161,9 @@ function Workshop() {
   const [chosen, setChosen] = useState("");
   const [addCategory, setAddCategory] = useState("beacon");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [lastBackup, setLastBackup] = useState<Receipt | null>(null);
   const [verifyPath, setVerifyPath] = useState("");
+  const [verificationReceiptId, setVerificationReceiptId] = useState("");
   const [verification, setVerification] = useState<Verification[]>([]);
   const [saveModal, setSaveModal] = useState(false);
   const [saveMode, setSaveMode] = useState("new");
@@ -264,6 +267,7 @@ function Workshop() {
     </label>
   );
   function clearEditor() {
+    setLastBackup(null);
     setOpened(null);
     setOpenedSaveLabel("");
     setOperations([]);
@@ -286,6 +290,7 @@ function Workshop() {
   }
   const changingGame = pathKey(settings.game) !== pathKey(savedGame);
   async function open(path: string) {
+    setLastBackup(null);
     setOpened(null);
     setOperations([]);
     setPreview(null);
@@ -465,6 +470,7 @@ function Workshop() {
     setOperations(next);
   }
   async function save() {
+    setLastBackup(null);
     let r: Receipt;
     try {
       r = await rpc<Receipt>("commit", {
@@ -486,10 +492,12 @@ function Workshop() {
     setOperations([]);
     setPreview(null);
     const message =
-      r.warning ||
-      (saveMode === "new"
-        ? "已保存为 {name}。请在游戏中手动加载；备份已保留。"
-        : "已保存。请在游戏中手动加载；备份已保留。");
+      r.state !== "completed"
+        ? "保存尚未完成，备份状态待确认。请在备份与恢复中查看记录。"
+        : r.warning ||
+          (saveMode === "new"
+            ? "已保存为 {name}。请在游戏中手动加载；备份已保留。"
+            : "已保存。请在游戏中手动加载；备份已保留。");
     const messageValues = { name: newName };
     try {
       setReceipts(await rpc<Receipt[]>("history"));
@@ -499,7 +507,12 @@ function Workshop() {
       } else {
         setPage("history");
       }
-      setNotice({ text: message, values: messageValues, error: !!r.warning });
+      setNotice({
+        text: message,
+        values: messageValues,
+        detail: r.state !== "completed" ? r.warning || undefined : undefined,
+        error: !!r.warning || r.state !== "completed",
+      });
     } catch (e) {
       setNotice({
         text: message,
@@ -511,12 +524,14 @@ function Workshop() {
         },
         error: true,
       });
+    } finally {
+      if (r.state === "completed") setLastBackup(r);
     }
   }
   const tabs = [
     ["garage", "车库", TruckIcon],
     ["catalog", "配件目录", Layers3],
-    ["history", "改装记录", History],
+    ["history", "备份与恢复", History],
     ["settings", "设置", Settings2],
   ] as const;
   return (
@@ -524,7 +539,7 @@ function Workshop() {
       <aside className="rail">
         <div className="brand">
           <div className="brand-icon">
-            <Wrench size={23} />
+            <img src="/logo-c.png" alt="" />
           </div>
           <div>
             ETS2<span>WORKSHOP</span>
@@ -545,9 +560,10 @@ function Workshop() {
           ))}
         </nav>
         <div className="rail-bottom">
-          <span className="dot" />
-          {tr("本地处理 · Windows x64")}
-          <div>0.2.0 / PUBLIC PREVIEW</div>
+          <div>
+            <span>{__APP_VERSION__}</span>
+            <span className="preview-label"> / PUBLIC PREVIEW</span>
+          </div>
         </div>
       </aside>
       <main>
@@ -562,8 +578,10 @@ function Workshop() {
               {count.toLocaleString()}
               {tr("个配件定义")}
             </span>
-            <ShieldCheck size={17} />
-            <span>{tr("自动备份")}</span>
+            <span className="header-backup">
+              <ShieldCheck size={17} />
+              {tr("自动备份")}
+            </span>
           </div>
         </header>
         <fieldset disabled={!!busy} className="workspace">
@@ -643,6 +661,25 @@ function Workshop() {
                   {operations.length > 0 && <b>{operations.length}</b>}
                 </button>
               </div>
+              {lastBackup?.state === "completed" && (
+                <section className="backup-status" role="status">
+                  <ShieldCheck size={21} />
+                  <div className="backup-status-copy">
+                    <strong>{tr("原存档已备份")}</strong>
+                    <span>{tr("最近一次保存前的原存档，可从此恢复。")}</span>
+                  </div>
+                  <button
+                    className="primary"
+                    onClick={() => setRestoreId(lastBackup.id)}
+                  >
+                    <Undo2 size={16} />
+                    {tr("恢复此备份")}
+                  </button>
+                  <button onClick={() => setPage("history")}>
+                    {tr("查看全部备份")}
+                  </button>
+                </section>
+              )}
               <div className="savebar">
                 <FolderOpen size={20} />
                 <select
@@ -1214,6 +1251,10 @@ function Workshop() {
                           )}
                           {selected && (
                             <div className="candidate-metrics">
+                              <p className="backup-reminder">
+                                <ShieldCheck size={16} />
+                                {tr("尚未写入，保存时自动备份原存档")}
+                              </p>
                               <Comparison
                                 before={
                                   action === "replace" ? part?.definition : null
@@ -1257,7 +1298,10 @@ function Workshop() {
                           {tr("待保存的修改")}{" "}
                           <span className="tag">{operations.length}</span>
                         </h2>
-                        <span>{tr("尚未写入游戏存档")}</span>
+                        <span className="backup-reminder">
+                          <ShieldCheck size={16} />
+                          {tr("尚未写入，保存时自动备份原存档")}
+                        </span>
                       </div>
                       {preview.changes.map((c, n) => (
                         <div className="change" key={n}>
@@ -1533,11 +1577,11 @@ function Workshop() {
             <>
               <div className="page-title">
                 <div>
-                  <div className="eyebrow">CHANGE HISTORY</div>
-                  <h1>{tr("每次改装，都有据可查。")}</h1>
+                  <div className="eyebrow">BACKUPS & RESTORE</div>
+                  <h1>{tr("备份与恢复")}</h1>
                   <p>
                     {tr(
-                      "读取游戏另存的结果，检查配件是否保留。车辆身份变化时会提示手动核对。",
+                      "每次保存前自动备份原存档。选择一条记录，即可恢复到这次修改前。",
                     )}
                   </p>
                 </div>
@@ -1552,31 +1596,6 @@ function Workshop() {
                   {tr("刷新")}
                 </button>
               </div>
-              <section className="card">
-                <label>
-                  {tr("用于复查的游戏存档")}
-                  <select
-                    value={verifyPath}
-                    onChange={(e) => setVerifyPath(e.target.value)}
-                  >
-                    <option value="">{tr("选择游戏另存的结果")}</option>
-                    {saves.map((s) => (
-                      <option key={s.path} value={s.path}>
-                        {s.name} · {s.profile}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {saveFilter}
-                {discoveryWarnings.map((warning) => (
-                  <p className="inline-warning" key={warning}>
-                    <SourceMessage text={warning} />
-                  </p>
-                ))}
-                <button onClick={() => task("刷新游戏存档", refresh)}>
-                  {tr("刷新存档列表")}
-                </button>
-              </section>
               <div className="history-list">
                 {receipts.map((r) => (
                   <article className="card" key={r.id}>
@@ -1592,6 +1611,12 @@ function Workshop() {
                       </span>
                     </div>
                     <code className="break">{r.output}</code>
+                    {r.state === "completed" && (
+                      <p className="history-backup-status">
+                        <ShieldCheck size={16} />
+                        {tr("原存档已备份")}
+                      </p>
+                    )}
                     {r.state === "preparing" && (
                       <p>
                         {tr(
@@ -1599,10 +1624,10 @@ function Workshop() {
                         )}
                       </p>
                     )}
-                    {r.state === "prepared" && (
+                    {r.state !== "completed" && r.state !== "preparing" && (
                       <p>
                         {tr(
-                          "写入未确认或已中断。备份保留在下方位置；恢复时会核对目标内容，拒绝覆盖新的进度。",
+                          "保存未完成或写入未确认，备份状态待确认。恢复时会检查备份与目标内容，拒绝覆盖新的进度。",
                         )}
                       </p>
                     )}
@@ -1615,75 +1640,119 @@ function Workshop() {
                     ))}
                     <div className="button-row">
                       <button
-                        disabled={!verifyPath}
-                        onClick={() =>
-                          task("检查改装是否保留", async () =>
-                            setVerification(
-                              await rpc<Verification[]>("verify", {
-                                id: r.id,
-                                path: verifyPath,
-                              }),
-                            ),
-                          )
-                        }
+                        className="primary history-restore"
+                        onClick={() => setRestoreId(r.id)}
                       >
-                        <ShieldCheck size={16} />
-                        {tr("复查所选存档")}
-                      </button>
-                      <button onClick={() => setRestoreId(r.id)}>
                         <Undo2 size={16} />
-                        {tr("恢复修改前")}
+                        {tr("恢复此备份")}
                       </button>
                     </div>
-                    <button
-                      onClick={() =>
-                        task("清理临时文件", async () => {
-                          await rpc("cleanup", { id: r.id });
-                          setNotice({
-                            text: "已清理该记录的临时文件，备份和存档已保留",
-                            error: false,
-                          });
-                        })
-                      }
-                    >
-                      {tr("清理临时文件")}
-                    </button>
-                    <details>
+                    <details className="history-verification">
+                      <summary>{tr("检查游戏保存后的改装是否保留")}</summary>
+                      <p>
+                        {tr(
+                          "在游戏中加载改装存档，再保存一次，然后选择该存档进行检查。此检查只读取配件，不会恢复备份或修改存档。",
+                        )}
+                      </p>
+                      <label>
+                        {tr("游戏保存后的存档")}
+                        <select
+                          value={verifyPath}
+                          onChange={(e) => {
+                            setVerifyPath(e.target.value);
+                            setVerification([]);
+                          }}
+                        >
+                          <option value="">{tr("选择游戏另存的结果")}</option>
+                          {saves.map((s) => (
+                            <option key={s.path} value={s.path}>
+                              {s.name} · {s.profile}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {saveFilter}
+                      {discoveryWarnings.map((warning) => (
+                        <p className="inline-warning" key={warning}>
+                          <SourceMessage text={warning} />
+                        </p>
+                      ))}
+                      <div className="button-row">
+                        <button onClick={() => task("刷新游戏存档", refresh)}>
+                          {tr("刷新存档列表")}
+                        </button>
+                        <button
+                          disabled={!verifyPath}
+                          onClick={() =>
+                            task("检查改装是否保留", async () => {
+                              setVerification([]);
+                              setVerificationReceiptId(r.id);
+                              setVerification(
+                                await rpc<Verification[]>("verify", {
+                                  id: r.id,
+                                  path: verifyPath,
+                                }),
+                              );
+                            })
+                          }
+                        >
+                          <ShieldCheck size={16} />
+                          {tr("检查所选存档")}
+                        </button>
+                      </div>
+                      {verificationReceiptId === r.id &&
+                        verification.length > 0 && (
+                          <section>
+                            <h3>{tr("游戏保存检查结果")}</h3>
+                            {verification.map((v, i) => (
+                              <p key={i}>
+                                <strong>
+                                  {tr(labels[v.category] || v.category)}：
+                                  <SourceMessage text={v.status} />
+                                </strong>
+                                <br />
+                                <code className="break">
+                                  {v.matches.join("\n")}
+                                </code>
+                              </p>
+                            ))}
+                          </section>
+                        )}
+                    </details>
+                    <details className="history-tools">
                       <summary>{tr("备份位置")}</summary>
                       <code className="break">{r.backup}</code>
+                      <button
+                        onClick={() =>
+                          task("清理临时文件", async () => {
+                            await rpc("cleanup", { id: r.id });
+                            setNotice({
+                              text: "已清理该记录的临时文件，备份和存档已保留",
+                              error: false,
+                            });
+                          })
+                        }
+                      >
+                        {tr("清理临时文件")}
+                      </button>
                     </details>
                   </article>
                 ))}
               </div>
               {!receipts.length && (
                 <div className="empty">
-                  {tr("保存第一次改装后，记录将显示在这里。")}
+                  <ShieldCheck size={30} />
+                  <h2>{tr("还没有备份")}</h2>
+                  <p>
+                    {tr(
+                      "选择配件、加入变更清单时不会创建备份。确认保存后，工具会先备份原存档，再写入改装；备份记录会显示在这里。",
+                    )}
+                  </p>
                 </div>
-              )}
-              {verification.length > 0 && (
-                <section className="card">
-                  <h2>{tr("复查结果")}</h2>
-                  {verification.map((v, i) => (
-                    <p key={i}>
-                      <strong>
-                        {tr(labels[v.category] || v.category)}：
-                        {<SourceMessage text={v.status} />}
-                      </strong>
-                      <br />
-                      <code className="break">{v.matches.join("\n")}</code>
-                    </p>
-                  ))}
-                </section>
               )}
             </>
           )}
         </fieldset>
-        <footer>
-          <span>ETS2 Workshop</span>
-          <span>
-            {tr("独立油箱与发动机跨品牌替换已实测 · 外观组合仍需游戏内验证")}
-          </span>
-        </footer>
       </main>
       {showSetup && (
         <Onboarding
@@ -1800,6 +1869,7 @@ function Workshop() {
                       id: restoreId,
                     });
                     setRestoreId("");
+                    setLastBackup(null);
                     setOpened(null);
                     setOperations([]);
                     setPreview(null);

@@ -31,11 +31,8 @@ try {
     .locator(".savebar select option")
     .evaluateAll(
       (options, prefix) =>
-        options.find((o) =>
-          o.value
-            .replaceAll("\\", "/")
-            .startsWith(prefix),
-        )?.value,
+        options.find((o) => o.value.replaceAll("\\", "/").startsWith(prefix))
+          ?.value,
       fixture + "/game/profiles/fixture/save/1/",
     );
   assert(sourcePath);
@@ -67,7 +64,8 @@ try {
     .locator(".notice.success")
     .filter({ hasText: "已保存为 UI_smoke_780" })
     .waitFor({ timeout: 30000 });
-  await page.locator(".nav").filter({ hasText: "改装记录" }).click();
+  await page.locator(".nav").filter({ hasText: "备份与恢复" }).click();
+  await page.locator(".history-verification summary").first().click();
   const resultPath = await page
     .locator("select option")
     .evaluateAll(
@@ -77,7 +75,7 @@ try {
   assert(resultPath);
   await page.locator("select").selectOption(resultPath);
   await page
-    .getByRole("button", { name: "复查所选存档", exact: true })
+    .getByRole("button", { name: "检查所选存档", exact: true })
     .first()
     .click();
   await page
@@ -88,7 +86,7 @@ try {
     fullPage: true,
   });
   await page
-    .getByRole("button", { name: "恢复修改前", exact: true })
+    .getByRole("button", { name: "恢复此备份", exact: true })
     .first()
     .click();
   await page

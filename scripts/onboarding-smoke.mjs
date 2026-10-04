@@ -171,10 +171,30 @@ try {
   const page = await start();
   await page.locator(".onboarding fieldset:not([disabled])").waitFor();
   assert.equal(resolve((await rpc(page, "init")).data_dir), app);
-  const gameInput = page.locator("input[list=detected-games]");
-  const docsInput = page.locator("input[list=detected-docs]");
+  const gameInput = page.locator("input#game-directory");
+  const docsInput = page.locator("input#documents-directory");
   assert.equal(await gameInput.inputValue(), "");
   assert.equal(await docsInput.inputValue(), "");
+  assert.equal(await page.locator(".onboarding datalist").count(), 0);
+  const paths = await page.locator(".onboarding-path").evaluateAll((items) =>
+    items.map((item) => {
+      const input = item.querySelector("input").getBoundingClientRect();
+      const select = item.querySelector("select").getBoundingClientRect();
+      const css = getComputedStyle(item.querySelector("select"));
+      return {
+        delta: Math.abs(
+          input.top + input.height / 2 - select.top - select.height / 2,
+        ),
+        right: input.right - select.right,
+        arrow: css.backgroundImage,
+      };
+    }),
+  );
+  assert(
+    paths.every((p) => p.delta < 1 && p.right <= 2),
+    "Both directory arrows align within the same input row",
+  );
+  assert.equal(paths[0].arrow, paths[1].arrow);
   assert(
     await page.getByRole("button", { name: "确认路径并准备" }).isDisabled(),
   );

@@ -206,7 +206,7 @@ try {
     .locator(".onboarding .language-picker select")
     .selectOption("zh-CN");
   assert.equal(
-    await page.locator('input[list="detected-games"]').inputValue(),
+    await page.locator("input#game-directory").inputValue(),
     "synthetic-game",
   );
   await page.getByRole("button", { name: "取消", exact: true }).click();

@@ -337,6 +337,31 @@ const english: Record<string, string> = {
 };
 
 Object.assign(english, {
+  选择检测到的位置: "Select a detected location",
+  备份与恢复: "Backups & restore",
+  "保存尚未完成，备份状态待确认。请在备份与恢复中查看记录。":
+    "Saving is not complete and backup status needs confirmation. Check the record in Backups & restore.",
+  原存档已备份: "Original save backed up",
+  "最近一次保存前的原存档，可从此恢复。":
+    "Restore the original save from before your most recent save.",
+  恢复此备份: "Restore this backup",
+  查看全部备份: "View all backups",
+  "尚未写入，保存时自动备份原存档":
+    "No changes written. The original save is backed up when you save.",
+  "每次保存前自动备份原存档。选择一条记录，即可恢复到这次修改前。":
+    "The original save is backed up before each save. Choose a record to restore the save from before those changes.",
+  "保存未完成或写入未确认，备份状态待确认。恢复时会检查备份与目标内容，拒绝覆盖新的进度。":
+    "Saving is incomplete or writing is unconfirmed. Backup status needs confirmation. Restore checks the backup and target, and refuses to overwrite newer progress.",
+  检查游戏保存后的改装是否保留:
+    "Check whether modifications survived an in-game save",
+  "在游戏中加载改装存档，再保存一次，然后选择该存档进行检查。此检查只读取配件，不会恢复备份或修改存档。":
+    "Load the modified save in the game and save again, then select that save to check it. This only reads parts; it does not restore a backup or change the save.",
+  游戏保存后的存档: "Save created after saving in the game",
+  检查所选存档: "Check selected save",
+  游戏保存检查结果: "In-game save check results",
+  还没有备份: "No backups yet",
+  "选择配件、加入变更清单时不会创建备份。确认保存后，工具会先备份原存档，再写入改装；备份记录会显示在这里。":
+    "Choosing parts and staging changes does not create a backup. When you confirm saving, the original save is backed up before modifications are written. Backup records will appear here.",
   变速器: "Transmission",
   喷漆: "Paint job",
   防撞杠: "Bull bar",

@@ -118,83 +118,87 @@ export default function Onboarding({
           <span>{tr("3 打开车库")}</span>
         </div>
         <fieldset disabled={busy}>
-          <label>
+          <label htmlFor="game-directory">
             {tr("游戏安装目录")}
-            <input
-              list="detected-games"
-              value={value.game}
-              onChange={(e) => setValue({ ...value, game: e.target.value })}
-              placeholder={tr("包含 def.scs 的 Euro Truck Simulator 2 文件夹")}
-            />
-            <datalist id="detected-games">
-              {detected?.games.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
+            <span className="onboarding-path">
+              <input
+                id="game-directory"
+                aria-label={tr("游戏安装目录")}
+                value={value.game}
+                onChange={(e) => setValue({ ...value, game: e.target.value })}
+                placeholder={tr(
+                  "包含 def.scs 的 Euro Truck Simulator 2 文件夹",
+                )}
+              />
+              {!!detected?.games.length && (
+                <select
+                  className="path-options"
+                  aria-label={tr("选择游戏安装位置")}
+                  value={detected.games.includes(value.game) ? value.game : ""}
+                  onChange={(e) => {
+                    if (e.target.value)
+                      setValue({ ...value, game: e.target.value });
+                  }}
+                >
+                  <option value="" disabled>
+                    {tr("选择检测到的位置")}
+                  </option>
+                  {detected.games.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </span>
             <small>
               {tr("已检测到")}
               {detected?.games.length || 0}
               {tr("个安装位置，可手动修改。")}
             </small>
-            {(detected?.games.length || 0) > 1 && (
-              <select
-                aria-label={tr("选择游戏安装位置")}
-                value={detected?.games.includes(value.game) ? value.game : ""}
-                onChange={(e) => setValue({ ...value, game: e.target.value })}
-              >
-                <option value="">
-                  {tr("检测到多个安装位置，请选择或手动填写")}
-                </option>
-                {detected?.games.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            )}
           </label>
-          <label>
+          <label htmlFor="documents-directory">
             {tr("ETS2 用户数据目录")}
-            <input
-              list="detected-docs"
-              value={value.documents}
-              onChange={(e) =>
-                setValue({ ...value, documents: e.target.value })
-              }
-              placeholder={tr("通常为文档中的 Euro Truck Simulator 2 文件夹")}
-            />
-            <datalist id="detected-docs">
-              {detected?.documents.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
+            <span className="onboarding-path">
+              <input
+                id="documents-directory"
+                aria-label={tr("ETS2 用户数据目录")}
+                value={value.documents}
+                onChange={(e) =>
+                  setValue({ ...value, documents: e.target.value })
+                }
+                placeholder={tr("通常为文档中的 Euro Truck Simulator 2 文件夹")}
+              />
+              {!!detected?.documents.length && (
+                <select
+                  className="path-options"
+                  aria-label={tr("选择用户数据位置")}
+                  value={
+                    detected.documents.includes(value.documents)
+                      ? value.documents
+                      : ""
+                  }
+                  onChange={(e) => {
+                    if (e.target.value)
+                      setValue({ ...value, documents: e.target.value });
+                  }}
+                >
+                  <option value="" disabled>
+                    {tr("选择检测到的位置")}
+                  </option>
+                  {detected.documents.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </span>
             <small>
               {tr(
                 "包含 profiles、steam_profiles 或 config.cfg，通常与游戏安装目录不同。",
               )}
             </small>
-            {(detected?.documents.length || 0) > 1 && (
-              <select
-                aria-label={tr("选择用户数据位置")}
-                value={
-                  detected?.documents.includes(value.documents)
-                    ? value.documents
-                    : ""
-                }
-                onChange={(e) =>
-                  setValue({ ...value, documents: e.target.value })
-                }
-              >
-                <option value="">
-                  {tr("检测到多个用户数据位置，请选择或手动填写")}
-                </option>
-                {detected?.documents.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            )}
           </label>
           {detected?.notes.map((note) => (
             <p className="detection-note" key={note}>

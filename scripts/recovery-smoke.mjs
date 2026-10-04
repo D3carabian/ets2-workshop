@@ -172,12 +172,18 @@ try {
     join(app, "history", r.id, "receipt.json"),
     JSON.stringify({ ...r, state: "prepared" }),
   );
-  await page.locator(".nav").filter({ hasText: "改装记录" }).click();
+  await page.locator(".nav").filter({ hasText: "备份与恢复" }).click();
   await page.getByRole("button", { name: "刷新", exact: true }).click();
-  await page.getByText(/写入未确认或已中断/).waitFor();
+  await page.getByText(/保存未完成或写入未确认/).waitFor();
+  assert.equal(
+    await page.locator(".history-backup-status").count(),
+    0,
+    "Unconfirmed receipts must not claim completed backups",
+  );
+  await page.locator(".history-tools summary").click();
   await page.getByRole("button", { name: "清理临时文件", exact: true }).click();
   await page.locator(".notice.success").filter({ hasText: "已清理" }).waitFor();
-  await page.getByRole("button", { name: "恢复修改前", exact: true }).click();
+  await page.getByRole("button", { name: "恢复此备份", exact: true }).click();
   assert.match(await page.locator(".modal").innerText(), /不删除存档槽/);
   await page
     .locator(".modal")
