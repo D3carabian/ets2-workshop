@@ -8,8 +8,7 @@ use crate::{
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    io::{self, Read},
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -98,26 +97,49 @@ fn optional_text(path: &Path) -> Result<Option<String>> {
         Err(e) => Err(failure(path, e)),
     }
 }
-fn directories(path: &Path) -> Result<Vec<PathBuf>> {
-    let Some(metadata) = optional_metadata(path)? else {
-        return Ok(vec![]);
-    };
-    if !metadata.is_dir() {
-        return Err(failure(path, "该路径不是文件夹"));
-    }
-    let mut paths = Vec::new();
-    for entry in fs::read_dir(path).map_err(|e| failure(path, e))? {
-        let entry = entry.map_err(|e| failure(path, e))?;
-        if entry
-            .metadata()
-            .map_err(|e| failure(&entry.path(), e))?
-            .is_dir()
-        {
-            paths.push(entry.path());
+fn reported<T>(warnings: &mut Vec<String>, result: Result<T>) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
+            if !warnings.contains(&error) {
+                warnings.push(error);
+            }
+            None
         }
     }
-    paths.sort();
-    Ok(paths)
+}
+fn entries(path: &Path, warnings: &mut Vec<String>) -> Vec<(PathBuf, fs::Metadata)> {
+    let Some(Some(metadata)) = reported(warnings, optional_metadata(path)) else {
+        return vec![];
+    };
+    if !metadata.is_dir() {
+        note(warnings, Err(failure(path, "该路径不是文件夹")));
+        return vec![];
+    }
+    let Some(entries) = reported(warnings, fs::read_dir(path).map_err(|e| failure(path, e))) else {
+        return vec![];
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let Some(entry) = reported(warnings, entry.map_err(|e| failure(path, e))) else {
+            continue;
+        };
+        let Some(metadata) = reported(
+            warnings,
+            entry.metadata().map_err(|e| failure(&entry.path(), e)),
+        ) else {
+            continue;
+        };
+        paths.push((entry.path(), metadata));
+    }
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    paths
+}
+fn directories(path: &Path, warnings: &mut Vec<String>) -> Vec<PathBuf> {
+    entries(path, warnings)
+        .into_iter()
+        .filter_map(|(path, metadata)| metadata.is_dir().then_some(path))
+        .collect()
 }
 fn add(paths: &mut Vec<String>, path: &Path) -> Result<()> {
     let Some(metadata) = optional_metadata(path)? else {
@@ -137,11 +159,7 @@ fn add(paths: &mut Vec<String>, path: &Path) -> Result<()> {
     Ok(())
 }
 fn note(notes: &mut Vec<String>, result: Result<()>) {
-    if let Err(error) = result {
-        if !notes.contains(&error) {
-            notes.push(error);
-        }
-    }
+    let _ = reported(notes, result);
 }
 
 #[derive(Debug)]
@@ -314,33 +332,32 @@ pub fn detect(inputs: &DiscoveryInputs) -> Detection {
                 note(&mut result.notes, add_game(&mut result.games, &game));
             }
         }
-        match directories(&root.join("userdata")) {
-            Ok(users) => {
-                for user in users {
-                    let remote = user.join("227300/remote");
-                    match optional_metadata(&remote.join("profiles")) {
-                        Ok(Some(m)) if m.is_dir() => {
-                            note(&mut result.notes, add(&mut result.documents, &remote))
+        for user in directories(&root.join("userdata"), &mut result.notes) {
+            let remote = user.join("227300/remote");
+            match optional_metadata(&remote.join("profiles")) {
+                Ok(Some(m)) if m.is_dir() => {
+                    note(&mut result.notes, add(&mut result.documents, &remote))
+                }
+                Ok(Some(_)) => note(
+                    &mut result.notes,
+                    Err(failure(&remote.join("profiles"), "该路径不是文件夹")),
+                ),
+                Err(e) => result.notes.push(e),
+                _ => (),
+            }
+            match optional_text(&user.join("config/localconfig.vdf")) {
+                Ok(Some(text)) => {
+                    let mut options = vec![];
+                    visit_launch_options(&keyvalues(&text), &mut options);
+                    for command in options {
+                        if let Some(home) = command_home(&command) {
+                            note(&mut result.notes, add(&mut result.documents, &home));
                         }
-                        Err(e) => result.notes.push(e),
-                        _ => (),
-                    }
-                    match optional_text(&user.join("config/localconfig.vdf")) {
-                        Ok(Some(text)) => {
-                            let mut options = vec![];
-                            visit_launch_options(&keyvalues(&text), &mut options);
-                            for command in options {
-                                if let Some(home) = command_home(&command) {
-                                    note(&mut result.notes, add(&mut result.documents, &home));
-                                }
-                            }
-                        }
-                        Err(e) => result.notes.push(e),
-                        _ => (),
                     }
                 }
+                Err(e) => result.notes.push(e),
+                _ => (),
             }
-            Err(e) => result.notes.push(e),
         }
     }
     // Process newly discovered homes too, with canonical deduplication bounding cycles.
@@ -377,29 +394,13 @@ fn add_game(games: &mut Vec<String>, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Preflight only the selected user-data tree before committing first-run settings.
-/// This enumerates directories without decoding or reading any save contents.
+/// Validate only the selected root; individual profiles and slots can fail independently.
 pub fn validate_documents(documents: &Path) -> Result<()> {
     if !optional_metadata(documents)?.is_some_and(|m| m.is_dir()) {
         return Err(failure(documents, "存档目录不存在或不是文件夹"));
     }
-    directories(documents)?;
-    for name in ["profiles", "steam_profiles"] {
-        for profile in directories(&documents.join(name))? {
-            directories(&profile)?;
-            for slot in directories(&profile.join("save"))? {
-                // Interrupted Workshop staging directories are private, never selectable saves.
-                if slot
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with(".workshop-")
-                {
-                    continue;
-                }
-                directories(&slot)?;
-            }
-        }
+    for entry in fs::read_dir(documents).map_err(|e| failure(documents, e))? {
+        entry.map_err(|e| failure(documents, e))?;
     }
     Ok(())
 }
@@ -408,24 +409,12 @@ pub fn validate_documents(documents: &Path) -> Result<()> {
 #[derive(Default)]
 pub struct SaveListCache {
     names: HashMap<String, CachedSaveName>,
+    warnings: Vec<String>,
 }
 struct CachedSaveName {
     digest: String,
     name: String,
     is_autosave: bool,
-}
-fn info_bytes(path: &Path) -> Result<Vec<u8>> {
-    const LIMIT: u64 = 256 * 1024 * 1024;
-    let mut bytes = Vec::new();
-    fs::File::open(path)
-        .map_err(|e| e.to_string())?
-        .take(LIMIT + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > LIMIT {
-        return Err("存档信息超过读取上限".into());
-    }
-    Ok(bytes)
 }
 pub fn is_autosave(slot: &str) -> bool {
     let slot = slot.to_ascii_lowercase();
@@ -435,6 +424,9 @@ pub fn discover(documents: &Path, inputs: &DiscoveryInputs) -> Result<Vec<SaveEn
     SaveListCache::default().discover(documents, inputs, true)
 }
 impl SaveListCache {
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
     pub fn discover(
         &mut self,
         documents: &Path,
@@ -456,12 +448,11 @@ impl SaveListCache {
         include_autosaves: bool,
         decode: &dyn Fn(&Path, &[u8]) -> Result<String>,
     ) -> Result<Vec<SaveEntry>> {
-        if !optional_metadata(documents)?.is_some_and(|m| m.is_dir()) {
-            return Err(failure(documents, "存档目录不存在或不是文件夹"));
-        }
+        self.warnings.clear();
+        validate_documents(documents)?;
         let mut roots = vec![documents.join("profiles"), documents.join("steam_profiles")];
         for steam in &inputs.steam_roots {
-            for user in directories(&steam.join("userdata"))? {
+            for user in directories(&steam.join("userdata"), &mut self.warnings) {
                 roots.push(user.join("227300/remote/profiles"));
             }
         }
@@ -469,15 +460,32 @@ impl SaveListCache {
         let mut seen_saves = HashSet::new();
         let mut out = Vec::new();
         for root in roots {
-            if optional_metadata(&root)?.is_none() {
+            let profiles = directories(&root, &mut self.warnings);
+            if profiles.is_empty() {
                 continue;
             }
-            let canonical = fs::canonicalize(&root).map_err(|e| failure(&root, e))?;
+            let Some(canonical) = reported(
+                &mut self.warnings,
+                fs::canonicalize(&root).map_err(|e| failure(&root, e)),
+            ) else {
+                continue;
+            };
             if !seen_roots.insert(identity(&canonical)) {
                 continue;
             }
-            for profile in directories(&root)? {
-                for slot in directories(&profile.join("save"))? {
+            for profile in profiles {
+                let Some((save_dir, _)) =
+                    entries(&profile, &mut self.warnings)
+                        .into_iter()
+                        .find(|(path, _)| {
+                            path.file_name().is_some_and(|name| {
+                                name.to_string_lossy().eq_ignore_ascii_case("save")
+                            })
+                        })
+                else {
+                    continue;
+                };
+                for slot in directories(&save_dir, &mut self.warnings) {
                     // Interrupted Workshop staging directories are private, never selectable saves.
                     if slot
                         .file_name()
@@ -492,25 +500,43 @@ impl SaveListCache {
                     if is_autosave && !include_autosaves {
                         continue;
                     }
-                    let path = slot.join("game.sii");
-                    if !optional_metadata(&path)?.is_some_and(|m| m.is_file()) {
+                    let Some((path, metadata)) = entries(&slot, &mut self.warnings)
+                        .into_iter()
+                        .find(|(path, _)| {
+                            path.file_name().is_some_and(|name| {
+                                name.to_string_lossy().eq_ignore_ascii_case("game.sii")
+                            })
+                        })
+                    else {
+                        continue;
+                    };
+                    if !metadata.is_file() {
+                        note(&mut self.warnings, Err(failure(&path, "该路径不是文件")));
                         continue;
                     }
-                    let path = fs::canonicalize(&path).map_err(|e| failure(&path, e))?;
+                    let Some(path) = reported(
+                        &mut self.warnings,
+                        fs::canonicalize(&path).map_err(|e| failure(&path, e)),
+                    ) else {
+                        continue;
+                    };
                     if !seen_saves.insert(identity(&path)) {
                         continue;
                     }
                     let info = slot.join("info.sii");
-                    let metadata = fs::metadata(&path).map_err(|e| failure(&path, e))?;
-                    let modified = metadata
-                        .modified()
-                        .map_err(|e| failure(&path, e))?
+                    let Some(modified) = reported(
+                        &mut self.warnings,
+                        metadata.modified().map_err(|e| failure(&path, e)),
+                    ) else {
+                        continue;
+                    };
+                    let modified = modified
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
                     let key = identity(&path);
                     let result = (|| -> Result<String> {
-                        let bytes = info_bytes(&info)?;
+                        let bytes = decoder::read_bounded(&info)?;
                         let digest = crate::hash(&bytes);
                         if let Some(previous) = self.names.get(&key) {
                             if previous.digest == digest {
@@ -525,7 +551,7 @@ impl SaveListCache {
                             .map(unquote)
                             .filter(|s| !s.is_empty())
                             .unwrap_or_else(|| slot_name.to_string());
-                        if crate::hash(&info_bytes(&info)?) != digest {
+                        if crate::hash(&decoder::read_bounded(&info)?) != digest {
                             return Err("读取时存档信息发生变化，请刷新重试".into());
                         }
                         self.names.insert(

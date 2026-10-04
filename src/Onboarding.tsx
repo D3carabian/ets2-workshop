@@ -208,7 +208,7 @@ export default function Onboarding({
             </span>
             <span>
               <Check size={16} />
-              {tr("自动从 SCS 官方获取解包工具并校验")}
+              {tr("需要解包时，自动从 SCS 官方获取工具并校验")}
             </span>
             <span>
               <Check size={16} />
@@ -218,7 +218,7 @@ export default function Onboarding({
           <p className="inline-warning">
             <CircleAlert size={16} />
             {tr(
-              "仅支持原版及官方 DLC，不支持 Mod 存档。首次准备需要网络及用于解包缓存的磁盘空间。",
+              "仅支持原版及官方 DLC，不支持 Mod 存档。直接读取不需要下载工具；遇到需要解包的归档时，请保持联网并预留磁盘空间。",
             )}
           </p>
           {error && (

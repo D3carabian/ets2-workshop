@@ -1,6 +1,8 @@
 # 游戏配件目录性能（2026-10-03）
 
-这次优化保持 P4 配件范围、官方 DLC 扫描顺序、属性和双语名称不变。安装在本机的 24 个原版／已识别 DLC 归档共得到 26,382 个定义；新实现与优化前官方完整解包结果逐字段比较完全相同。
+以下首轮数据对应 `6945e06` / `b13e0c7`；外部审查后的当前实现与新增定义见 [后续修复记录](EXTERNAL_REVIEW_FIXES.md)。
+
+首轮优化保持 P4 配件范围、官方 DLC 扫描顺序、属性和双语名称不变。安装在本机的 24 个原版／已识别 DLC 归档共得到 26,382 个定义；新实现与优化前官方完整解包结果逐字段比较完全相同。
 
 ## 实测
 
@@ -21,7 +23,7 @@
 - 热更新：根据完整包清单、归档规范路径、长度和完整修改时间（不是整秒）检查缓存。`def.scs`、已识别 DLC 或 `locale.scs` 改变，以及 DLC 增加／删除，都会重建；更新过程中资源再次发生变化则拒绝保存本次结果。
 - 语言读取失败：本次仍可按回退名称查看，但不缓存失败的目录结果；解除文件占用后点击更新会重新加载名称。
 - 缓存损坏或版本不符：重新建立，不返回损坏结果。缓存版本独立于可读取的 `Catalog` 格式，旧目录依然能打开。独立审查后构建缓存版本升至 2，避免复用旧解析器可能漏掉嵌套引用的结果。
-- HashFS v1、未知压缩／元数据、缺失目录项、非法目录或大小超限：该包回退到现有官方解包器，并报告具体原因。官方解包器的获取和校验流程没有绕过；仍需要先通过首次配置检查。
+- HashFS v1、未知压缩／元数据、缺失目录项、非法目录或大小超限：该包回退到现有官方解包器，并报告具体原因。官方解包器的获取和校验流程没有绕过；只有实际回退时才获取并校验工具；原生读取和热缓存无需工具存在。
 
 没有引入依赖，也没有把游戏定义或文本添加到仓库。当前选择范围仍是原版和既有识别规则下的官方 DLC，未扩展 Mod 支持。资源版本判断依赖文件系统长度与完整修改时间；人为修改内容后刻意还原相同时间和长度不在自动失效保证内。
 
@@ -39,6 +41,6 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml --lib
 cargo test --locked --manifest-path src-tauri/Cargo.toml --lib catalog::name_tests::installed_catalog_performance_and_equivalence -- --ignored --nocapture
 ```
 
-验收创建独立 `verification/catalog-perf/selective-*` 目录，结束后自动清理，仅保留 `verification/catalog-perf/result.json` 的计时和等价结果。此性能用例默认忽略，普通 CI 不需要安装游戏。首次配置的旧归档回退由现有合成 HashFS v1 桌面回归验证。
+验收创建独立 `verification/catalog-perf/selective-*` 目录，结束后自动清理，仅保留 `verification/catalog-perf/result.json` 的计时和等价结果。此性能用例默认忽略，普通 CI 不需要安装游戏。首次配置桌面回归使用合成 HashFS v2 直接读取；损坏头触发官方工具下载校验及失败重试。未把该测试称为 HashFS v1 成功解包验证。
 
 格式核对来源：[SCS 官方解包器说明](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor)、[HashFS v2 目录格式参考](https://github.com/sk-zk/TruckLib.HashFs/blob/master/TruckLib.HashFs/HashFsV2Reader.cs)、[目录标记与常量](https://github.com/sk-zk/TruckLib.HashFs/blob/master/TruckLib.HashFs/HashFsV2/Consts.cs)。保留原 CityHash 许可归属。

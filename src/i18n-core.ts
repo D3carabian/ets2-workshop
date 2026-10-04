@@ -3,6 +3,16 @@ export type TextValues = Record<string, string | number>;
 export const LANGUAGE_STORAGE_KEY = "ets2-workshop.language";
 
 const english: Record<string, string> = {
+  "需要解包时，自动从 SCS 官方获取工具并校验":
+    "When extraction is needed, download and verify the official SCS tool automatically",
+  "仅支持原版及官方 DLC，不支持 Mod 存档。直接读取不需要下载工具；遇到需要解包的归档时，请保持联网并预留磁盘空间。":
+    "Base game and official DLC only; Mod saves are unsupported. Direct reading needs no tool download. Archives requiring extraction may need internet access and extra disk space.",
+  "覆盖或恢复前，请退出游戏并暂停会写入该存档的同步及其他程序。":
+    "Before overwriting or restoring, exit the game and pause synchronization or other programs that can write this save.",
+  "配件目录需要更新，当前仅供查看。请在设置中重新建立目录后再修改。":
+    "The parts library needs updating and is currently view-only. Rebuild it in Settings before editing.",
+  "请先保存或移除待保存修改，再更换游戏安装或重新配置":
+    "Save or remove pending changes before switching the game installation or running setup again",
   包含自动存档: "Include autosaves",
   默认显示手动存档和快速存档:
     "Manual saves and quicksaves are shown by default",

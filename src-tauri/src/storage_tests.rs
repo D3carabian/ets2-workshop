@@ -36,6 +36,26 @@ fn fixture(root: &Path) -> (Session, Catalog, Vec<Operation>) {
             },
         );
     }
+    // Bind synthetic definitions to an isolated source so normal freshness checks apply.
+    let game = root.parent().unwrap().join("synthetic-game");
+    std::fs::create_dir_all(&game).unwrap();
+    let pack = game.join("def.scs");
+    std::fs::write(&pack, b"synthetic source identity").unwrap();
+    let meta = std::fs::metadata(&pack).unwrap();
+    catalog.game_path = game.canonicalize().unwrap().to_string_lossy().into_owned();
+    catalog.parser_version = crate::catalog::BUILD_CACHE_VERSION;
+    catalog.source_fingerprint = crate::catalog::current_source_fingerprint(&game).unwrap();
+    catalog.scan_complete = true;
+    catalog.archives = vec![(
+        pack.to_string_lossy().into_owned(),
+        meta.len(),
+        meta.modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )];
+    catalog.fresh().unwrap();
     let s = Session::open(&root.join("game.sii"), &Settings::default()).unwrap();
     let ops = vec![Operation {
         truck_id: "t".into(),
@@ -45,6 +65,69 @@ fn fixture(root: &Path) -> (Session, Catalog, Vec<Operation>) {
         donor_accessory: None,
     }];
     (s, catalog, ops)
+}
+
+#[test]
+fn open_requires_readable_and_unchanged_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("1");
+    let (session, _, _) = fixture(&root);
+    let info = root.join("info.sii");
+    let original = std::fs::read(&info).unwrap();
+    assert_eq!(session.info_hash, hash(&original));
+
+    std::fs::remove_file(&info).unwrap();
+    assert!(Session::open(&session.path, &Settings::default()).is_err());
+    std::fs::create_dir(&info).unwrap();
+    assert!(Session::open(&session.path, &Settings::default()).is_err());
+    std::fs::remove_dir(&info).unwrap();
+    let result = Session::open_with(&session.path, |path| {
+        assert_ne!(path, info, "unreadable metadata must fail before decoding");
+        decoder::read(path)
+    });
+    assert!(result.is_err());
+
+    std::fs::write(
+        &info,
+        "SiiNunit {\nsave_container : info {\n dependencies: 1\n dependencies[0]: \"mod|custom\"\n}\n}\n",
+    )
+    .unwrap();
+    assert!(Session::open(&session.path, &Settings::default())
+        .err()
+        .unwrap()
+        .contains("Mod"));
+
+    // A decode may succeed even though its input changes or disappears before it returns.
+    for remove in [false, true] {
+        std::fs::write(&info, &original).unwrap();
+        let result = Session::open_with(&session.path, |path| {
+            let text = decoder::read(path)?;
+            if path == info {
+                if remove {
+                    std::fs::remove_file(path).unwrap();
+                } else {
+                    std::fs::write(path, text.replace("original", "changed")).unwrap();
+                }
+            }
+            Ok(text)
+        });
+        let error = result.err().expect("metadata race must reject the session");
+        assert!(error.contains(if remove {
+            "读取"
+        } else {
+            "存档信息发生变化"
+        }));
+    }
+
+    std::fs::write(&info, &original).unwrap();
+    let result = Session::open_with(&session.path, |path| {
+        let text = decoder::read(path)?;
+        if path == info {
+            std::fs::write(&session.path, "game changed during metadata decode").unwrap();
+        }
+        Ok(text)
+    });
+    assert!(result.err().unwrap().contains("存档发生变化"));
 }
 
 // One isolated test owns the process environment; fault hooks never affect production RPC.

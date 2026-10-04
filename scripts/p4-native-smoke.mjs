@@ -5,6 +5,10 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import {
+  createSyntheticGame,
+  bindSyntheticCatalog,
+} from "./synthetic-catalog.mjs";
 
 await mkdir(resolve("verification"), { recursive: true });
 const root = await mkdtemp(resolve("verification/p4-native-"));
@@ -12,6 +16,7 @@ const app = join(root, "app"),
   slot = join(root, "game/profiles/fixture/save/1");
 await mkdir(app, { recursive: true });
 await mkdir(slot, { recursive: true });
+const installation = await createSyntheticGame(join(root, "installation"));
 const definitions = {};
 function definition(model, category, id, names, metrics = {}) {
   const path = `/def/vehicle/truck/${model}/${category}/${id}.sii`;
@@ -103,7 +108,7 @@ await writeFile(
   join(app, "settings.json"),
   JSON.stringify({
     documents: join(root, "game"),
-    game: root,
+    game: installation,
     extractor: "",
     onboarding_version: 1,
   }),
@@ -118,6 +123,7 @@ await writeFile(
     name_schema: 1,
   }),
 );
+await bindSyntheticCatalog(join(app, "catalog.json"), installation);
 const port = 9232;
 const proc = spawn(resolve("src-tauri/target/debug/ets2-workshop.exe"), [], {
   windowsHide: true,

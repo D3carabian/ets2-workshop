@@ -14,6 +14,30 @@ pub struct Operation {
     pub candidate_path: String,
     pub donor_accessory: Option<String>,
 }
+enum EditAction<'a> {
+    Replace(&'a str),
+    Add(&'a str),
+}
+impl Operation {
+    fn validated_action(&self) -> Result<EditAction<'_>> {
+        match self.action.as_str() {
+            "replace" => self
+                .accessory_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .map(EditAction::Replace)
+                .ok_or_else(|| "未选择被替换配件".into()),
+            "add" if self.accessory_id.is_none() => self
+                .donor_accessory
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .map(EditAction::Add)
+                .ok_or_else(|| "追加外观件必须从现有车辆选择供体，以验证安装配置".into()),
+            "add" => Err("追加操作不能同时指定被替换配件".into()),
+            _ => Err("未知操作".into()),
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Change {
     pub truck_id: String,
@@ -127,19 +151,7 @@ fn wildcard(pattern: &str, value: &str) -> bool {
         .unwrap_or(false)
 }
 fn compatible(def: &crate::catalog::Definition, units: &[String]) -> bool {
-    (def.suitable.is_empty()
-        || def
-            .suitable
-            .iter()
-            .any(|p| units.iter().any(|u| wildcard(p, u))))
-        && !def
-            .conflicts
-            .iter()
-            .any(|p| units.iter().any(|u| wildcard(p, u)))
-        && def
-            .requires
-            .iter()
-            .all(|r| units.iter().any(|u| u.rsplit('.').next() == Some(r)))
+    violations(def, units).is_empty()
 }
 pub fn apply(
     doc: &Document,
@@ -165,6 +177,7 @@ pub fn apply(
         }
     }
     for op in operations {
+        let action = op.validated_action()?;
         let indices = truck_indices
             .get(&op.truck_id)
             .ok_or("目标不属于玩家车库")?;
@@ -181,13 +194,11 @@ pub fn apply(
             .collect();
         let mut before = String::new();
         let mut location = std::collections::BTreeMap::new();
-        if op.action == "replace" {
-            let id = op.accessory_id.as_ref().ok_or("未选择被替换配件")?;
-            let old = truck
-                .accessories
-                .iter()
-                .find(|a| &a.id == id)
-                .ok_or("该配件不属于目标卡车")?;
+        if let EditAction::Replace(id) = action {
+            let old =
+                truck.accessories.iter().find(|a| a.id == id).ok_or(
+                    "该配件不属于目标卡车；若它来自待保存的追加操作，请先移除依赖它的修改",
+                )?;
             if old.category != *cat {
                 return Err("只能替换相同类别与安装位置的配件".into());
             }
@@ -199,7 +210,7 @@ pub fn apply(
             let mut after_names: Vec<_> = truck
                 .accessories
                 .iter()
-                .filter(|a| &a.id != id)
+                .filter(|a| a.id != id)
                 .filter_map(|a| a.definition.as_ref().map(|d| d.unit.clone()))
                 .collect();
             after_names.push(def.unit.clone());
@@ -251,7 +262,7 @@ pub fn apply(
             before = old.path.clone();
             location = position(&result, id);
             result = result.replace(id, "data_path", quoted(&op.candidate_path)?)?;
-        } else if op.action == "add" {
+        } else if let EditAction::Add(donor_id) = action {
             if SINGLE.contains(&cat.as_str()) {
                 return Err(format!(
                     "禁止追加 {cat}：核心配件只能替换，重复底盘已在实测中导致崩溃"
@@ -265,18 +276,10 @@ pub fn apply(
             if truck.accessories.iter().any(|a| a.category == *cat) {
                 return Err("该安装类别已被占用，请使用替换".into());
             }
-            let donor_id = op
-                .donor_accessory
-                .as_ref()
-                .ok_or("追加外观件必须从现有车辆选择供体，以验证安装配置")?;
             let donor = &trucks[*accessory_owner
                 .get(donor_id)
                 .ok_or("供体配件不属于自有车辆")?];
-            let source = donor
-                .accessories
-                .iter()
-                .find(|a| a.id == *donor_id)
-                .unwrap();
+            let source = donor.accessories.iter().find(|a| a.id == donor_id).unwrap();
             if source.path != op.candidate_path || source.kind != "vehicle_addon_accessory" {
                 return Err("供体路径或类型不匹配".into());
             }
@@ -313,11 +316,10 @@ pub fn apply(
             }
             let seed = crate::hash(
                 format!(
-                    "{}:{}:{}:{}",
+                    "{}:{}:{}",
                     crate::hash(doc.text.as_bytes()),
                     op.truck_id,
-                    donor_id,
-                    changes.len()
+                    donor_id
                 )
                 .as_bytes(),
             );
@@ -361,8 +363,6 @@ pub fn apply(
             ])?;
             accessory_owner.insert(new_id, indices[0]);
             warnings.push("外观件的供体与安装结构已校验；实际外观与碰撞仍需进游戏检查".into());
-        } else {
-            return Err("未知操作".into());
         }
         changes.push(Change {
             truck_id: op.truck_id.clone(),

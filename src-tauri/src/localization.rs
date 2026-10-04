@@ -59,7 +59,7 @@ pub fn parse(text: &str) -> Result<Dictionary> {
 }
 
 fn include_path(parent: &str, relative: &str) -> Result<String> {
-    if relative.contains('\\') || relative.contains(':') {
+    if relative.contains(['\\', ':', '\0']) {
         return Err("无效语言文件引用".into());
     }
     let joined = if relative.starts_with('/') {
@@ -107,21 +107,16 @@ fn expand(
     if *budget > MAX_TEXT {
         return Err("语言文本过大".into());
     }
-    static INCLUDE: OnceLock<regex::Regex> = OnceLock::new();
-    let include = INCLUDE.get_or_init(|| {
-        regex::Regex::new(r#"(?m)^[ \t]*@include[ \t]+"([^"\r\n]+)"[^\r\n]*"#).unwrap()
-    });
     let mut output = String::new();
     let mut end = 0;
     stack.push(path.to_owned());
-    for capture in include.captures_iter(&text) {
-        let matched = capture.get(0).unwrap();
-        output.push_str(&text[end..matched.start()]);
-        let child = include_path(path, &capture[1])?;
+    for (matched, relative) in crate::sii::include_directives(&text)? {
+        output.push_str(&text[end..matched.start]);
+        let child = include_path(path, &relative)?;
         output.push_str(
             &expand(&child, read, stack, budget)?.ok_or_else(|| format!("缺少语言引用 {child}"))?,
         );
-        end = matched.end();
+        end = matched.end;
     }
     output.push_str(&text[end..]);
     stack.pop();
@@ -130,13 +125,12 @@ fn expand(
 
 /// Read only the installed game's en_gb and zh_cn locale trees; no network or save access.
 pub fn load(game: &Path, roots: &[(PathBuf, String)]) -> (Languages, Vec<String>) {
-    load_sources(game, roots, &crate::catalog::MemorySources::new())
+    load_sources(game, &crate::catalog::disk_sources(roots))
 }
 
 pub(crate) fn load_sources(
     game: &Path,
-    roots: &[(PathBuf, String)],
-    memory: &crate::catalog::MemorySources,
+    sources: &[crate::catalog::Source],
 ) -> (Languages, Vec<String>) {
     let mut languages = Languages::from([
         ("en".into(), Dictionary::new()),
@@ -147,7 +141,8 @@ pub(crate) fn load_sources(
         Ok(archive) => Some(archive),
         Err(error) => {
             warnings.push(format!(
-                "游戏名称文本未读取：{error}。未解析名称仍可按原始标识查看。"
+                "游戏名称文本 {} 未读取：{error}。未解析名称仍可按原始标识查看。",
+                game.join("locale.scs").display()
             ));
             None
         }
@@ -162,86 +157,58 @@ pub(crate) fn load_sources(
             .transpose()
     };
     for (language, directory) in [("en", "en_gb"), ("zh_cn", "zh_cn")] {
-        let mut read_into =
-            |path: &str, reader: &dyn Fn(&str) -> Result<Option<String>>| match expand(
-                path,
-                &reader,
-                &mut Vec::new(),
-                &mut 0,
-            )
-            .and_then(|text| text.map(|text| parse(&text)).transpose())
-            {
-                Ok(Some(dictionary)) => languages.get_mut(language).unwrap().extend(dictionary),
-                Ok(None) => {}
-                Err(error) => warnings.push(format!("语言文件 {path} 未加载：{error}")),
-            };
+        let read_into = |path: &str,
+                         reader: &dyn Fn(&str) -> Result<Option<String>>,
+                         languages: &mut Languages,
+                         warnings: &mut Vec<String>| match expand(
+            path,
+            &reader,
+            &mut Vec::new(),
+            &mut 0,
+        )
+        .and_then(|text| text.map(|text| parse(&text)).transpose())
+        {
+            Ok(Some(dictionary)) => languages.get_mut(language).unwrap().extend(dictionary),
+            Ok(None) => {}
+            Err(error) => warnings.push(format!("语言文件 {path} 未加载：{error}")),
+        };
         for filename in ["local.sii", "local.steam.sii", "local.override.sii"] {
-            read_into(&format!("locale/{directory}/{filename}"), &archive_read);
+            read_into(
+                &format!("locale/{directory}/{filename}"),
+                &archive_read,
+                &mut languages,
+                &mut warnings,
+            );
         }
-        for (root, _) in roots {
-            let mut files: Vec<_> = if let Some(entries) = memory.get(root) {
-                let prefix = format!("locale/{directory}/");
-                entries
-                    .keys()
-                    .filter_map(|path| path.strip_prefix(&prefix))
-                    .filter(|name| {
-                        !name.contains('/') && name.starts_with("local") && name.ends_with(".sii")
-                    })
-                    .map(str::to_owned)
-                    .collect()
-            } else {
-                let Ok(entries) = std::fs::read_dir(root.join("locale").join(directory)) else {
-                    continue;
-                };
-                entries
-                    .flatten()
-                    .filter_map(|entry| {
-                        let name = entry.file_name().to_string_lossy().into_owned();
-                        (name.starts_with("local") && name.ends_with(".sii")).then_some(name)
-                    })
-                    .collect()
-            };
-            files.sort();
-            let local_read = |path: &str| -> Result<Option<String>> {
-                if let Some(entries) = memory.get(root) {
-                    return match entries.get(path) {
-                        Some(bytes) => {
-                            if bytes.len() > 16 * 1024 * 1024 {
-                                return Err("语言文件过大".into());
-                            }
-                            crate::game_archive::decode_text(bytes).map(Some)
+        for (index, source) in sources.iter().enumerate() {
+            let files = source.paths(&format!("locale/{directory}"), false, &mut warnings);
+            for path in files.into_iter().filter(|path| {
+                path.rsplit('/')
+                    .next()
+                    .is_some_and(|name| name.starts_with("local") && name.ends_with(".sii"))
+            }) {
+                let entry_path = path.as_str();
+                let local_read = |path: &str| -> Result<Option<String>> {
+                    match source.read(path, 16 * 1024 * 1024)? {
+                        Some(bytes) => crate::game_archive::decode_text(&bytes).map(Some),
+                        None if path == entry_path => {
+                            Err(format!("{}:{path}: 列出的语言文件已消失", source.label()))
                         }
-                        None => archive_read(path),
-                    };
-                }
-                let file = root.join(path);
-                if !file.exists() {
-                    return archive_read(path);
-                }
-                if !file
-                    .canonicalize()
-                    .map_err(|error| error.to_string())?
-                    .starts_with(root.canonicalize().map_err(|error| error.to_string())?)
-                {
-                    return Err("语言文件路径越界".into());
-                }
-                if std::fs::metadata(&file)
-                    .map_err(|error| error.to_string())?
-                    .len()
-                    > 16 * 1024 * 1024
-                {
-                    return Err("语言文件过大".into());
-                }
-                crate::game_archive::decode_text(
-                    &std::fs::read(file).map_err(|error| error.to_string())?,
-                )
-                .map(Some)
-            };
-            for filename in files {
-                read_into(&format!("locale/{directory}/{filename}"), &local_read);
+                        None => {
+                            for previous in sources[..index].iter().rev() {
+                                if let Some(bytes) = previous.read(path, 16 * 1024 * 1024)? {
+                                    return crate::game_archive::decode_text(&bytes).map(Some);
+                                }
+                            }
+                            archive_read(path)
+                        }
+                    }
+                };
+                read_into(&path, &local_read, &mut languages, &mut warnings);
             }
         }
     }
+
     (languages, warnings)
 }
 
@@ -311,6 +278,20 @@ mod tests {
             BTreeMap::from([("part".into(), "真实名称".into())])
         );
     }
+    #[test]
+    fn comments_and_multiline_strings_do_not_request_missing_includes() {
+        let text = "/*\n@include \"missing.sui\"\n*/\nSiiNunit {\nlocalization_db : .l {\nkey[]: \"example\"\nval[]: \"first\n@include \\\"fake.sui\\\"\nlast\"\n}\n}";
+        let read = |path: &str| {
+            assert_eq!(path, "locale/en_gb/local.sii");
+            Ok(Some(text.into()))
+        };
+        let expanded = expand("locale/en_gb/local.sii", &read, &mut Vec::new(), &mut 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(expanded, text);
+        assert!(parse(&expanded).unwrap()["example"].contains("fake.sui"));
+    }
+
     #[test]
     fn includes_expand_and_reject_cycles_or_escape() {
         let files = BTreeMap::from([

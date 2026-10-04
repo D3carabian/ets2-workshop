@@ -1,5 +1,9 @@
 // Synthetic-only desktop test. Build with --features custom-protocol first.
 import { chromium } from "playwright";
+import {
+  bindSyntheticCatalog,
+  createSyntheticGame,
+} from "./synthetic-catalog.mjs";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { resolve, join } from "node:path";
@@ -11,6 +15,7 @@ await mkdir(workspace, { recursive: true });
 const root = await mkdtemp(join(workspace, "phase3-ui-"));
 assert(root.startsWith(workspace + "\\") || root.startsWith(workspace + "/"));
 const app = join(root, "app");
+const installation = await createSyntheticGame(join(root, "installation"));
 const documents = join(root, "game");
 const slot = join(documents, "profiles/fixture/save/1");
 await mkdir(slot, { recursive: true });
@@ -54,7 +59,7 @@ await writeFile(
   join(app, "settings.json"),
   JSON.stringify({
     documents,
-    game: root,
+    game: installation,
     extractor: "",
     onboarding_version: 1,
   }),
@@ -68,6 +73,7 @@ await writeFile(
     archives: [],
   }),
 );
+await bindSyntheticCatalog(join(app, "catalog.json"), installation);
 const port = 9238;
 const proc = spawn(resolve("src-tauri/target/debug/ets2-workshop.exe"), [], {
   windowsHide: true,
@@ -75,6 +81,7 @@ const proc = spawn(resolve("src-tauri/target/debug/ets2-workshop.exe"), [], {
   env: {
     ...process.env,
     ETS2_WORKSHOP_DATA_DIR: app,
+    WEBVIEW2_USER_DATA_FOLDER: join(root, "webview"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
   },
 });

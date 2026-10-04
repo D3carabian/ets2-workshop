@@ -132,7 +132,7 @@ async function start() {
                     steam_roots: [],
                     notes: ["合成环境：请选择目录。"],
                   }
-                : [];
+                : { saves: [], warnings: [] };
             return Promise.resolve(
               new Response(JSON.stringify(value), {
                 headers: {
@@ -192,6 +192,11 @@ try {
     .waitFor();
   assert.equal(await exists(join(app, "settings.json")), false);
   await docsInput.fill(docs);
+  // A deliberately unsupported synthetic header exercises the official fallback.
+  // Restore the valid v2 archive before testing successful native setup.
+  const unsupported = Buffer.from(archive);
+  unsupported.write("BAD!", 0, "ascii");
+  await writeFile(join(game, "def.scs"), unsupported);
   const target = join(app, "tools/scs-extractor-1.55/scs_extractor.exe");
   await mkdir(target, { recursive: true });
   await page.getByRole("button", { name: "确认路径并准备" }).click();
@@ -205,6 +210,17 @@ try {
     ["scs_extractor.exe"],
   );
   await rm(target, { recursive: true });
+  await page.getByRole("button", { name: "确认路径并准备" }).click();
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "配件目录准备失败" })
+    .waitFor({ timeout: 90000 });
+  assert.equal(await exists(join(app, "settings.json")), false);
+  assert.equal(
+    sha(await readFile(target)),
+    "55bd670691bee62c218220026a0b055bb597eb2c360e33e635c1c4c5c370ea29",
+  );
+  await writeFile(join(game, "def.scs"), archive);
   await mkdir(join(app, "settings.json"));
   await page.getByRole("button", { name: "确认路径并准备" }).click();
   await page
@@ -237,10 +253,13 @@ try {
     "/def/vehicle/truck/synthetic/engine/test.sii",
   ]);
   assert.equal((await rpc(page, "init")).needs_setup, false);
+  assert.equal((await rpc(page, "init")).catalog_rebuild_reason, null);
   await page.screenshot({ path: join(root, "complete.png") });
   await stop();
   const restarted = await start();
-  await restarted.getByRole("heading", { name: "每辆卡车，都有自己的配置。" }).waitFor();
+  await restarted
+    .getByRole("heading", { name: "每辆卡车，都有自己的配置。" })
+    .waitFor();
   assert.equal((await rpc(restarted, "init")).needs_setup, false);
   assert.equal(await restarted.locator(".onboarding").count(), 0);
   assert.deepEqual(await readFile(join(app, "settings.json")), saved);
@@ -251,9 +270,10 @@ try {
     explicitCandidates: true,
     manualPathPreserved: true,
     confirmationRequired: true,
-    downloadAndHashVerified: true,
+    fallbackDownloadAndHashVerified: true,
+    unsupportedArchiveRejectedWithoutPublication: true,
     failedCacheAndSettingsRetry: true,
-    freshExtraction: true,
+    selectiveV2Read: true,
     catalogCount: 1,
     restartPersisted: true,
     pageErrors: errors,

@@ -89,6 +89,11 @@ function Workshop() {
     extractor: "",
     onboarding_version: 0,
   });
+  const [savedGame, setSavedGame] = useState("");
+  const [discoveryWarnings, setDiscoveryWarnings] = useState<string[]>([]);
+  const [catalogRebuildReason, setCatalogRebuildReason] = useState<
+    string | null
+  >(null);
   const [showSetup, setShowSetup] = useState(false);
   const [firstSetup, setFirstSetup] = useState(false);
   const [saves, setSaves] = useState<SaveEntry[]>([]);
@@ -169,9 +174,13 @@ function Workshop() {
   const [catalogWarnings, setCatalogWarnings] = useState<string[]>([]);
   async function refreshNameStatus() {
     const status = await rpc<{
+      catalog_count: number;
       catalog_name_schema?: number;
       catalog_warnings?: string[];
+      catalog_rebuild_reason?: string | null;
     }>("init");
+    setCount(status.catalog_count);
+    setCatalogRebuildReason(status.catalog_rebuild_reason || null);
     setNameSchema(status.catalog_name_schema || 0);
     setCatalogWarnings(status.catalog_warnings || []);
   }
@@ -206,9 +215,14 @@ function Workshop() {
     }
   }
   async function refresh(preferred?: string, include = includeAutosaves) {
-    const list = await rpc<SaveEntry[]>("discover", {
-      include_autosaves: include,
-    });
+    const result = await rpc<{ saves: SaveEntry[]; warnings: string[] }>(
+      "discover",
+      {
+        include_autosaves: include,
+      },
+    );
+    const list = result.saves;
+    setDiscoveryWarnings(result.warnings);
     setSaves(list);
     setVerifyPath(
       (p) => list.find((s) => pathKey(s.path) === pathKey(p))?.path || "",
@@ -249,6 +263,28 @@ function Workshop() {
       <span>{tr("默认显示手动存档和快速存档")}</span>
     </label>
   );
+  function clearEditor() {
+    setOpened(null);
+    setOpenedSaveLabel("");
+    setOperations([]);
+    setPreview(null);
+    setTruckId("");
+    setPartId("");
+    setChosen("");
+  }
+  async function applySettings() {
+    const result = await rpc<{ settings: Settings; catalog_changed: boolean }>(
+      "settings",
+      { settings },
+    );
+    if (result.catalog_changed) clearEditor();
+    setSettings(result.settings);
+    setSavedGame(result.settings.game);
+    await refreshNameStatus();
+    setDefinitions(await rpc<Definition[]>("catalog"));
+    return result.catalog_changed;
+  }
+  const changingGame = pathKey(settings.game) !== pathKey(savedGame);
   async function open(path: string) {
     setOpened(null);
     setOperations([]);
@@ -283,10 +319,13 @@ function Workshop() {
         catalog_count: number;
         catalog_name_schema?: number;
         catalog_warnings?: string[];
+        catalog_rebuild_reason?: string | null;
         data_dir: string;
         needs_setup: boolean;
       }>("init");
       setSettings(init.settings);
+      setSavedGame(init.settings.game);
+      setCatalogRebuildReason(init.catalog_rebuild_reason || null);
       setCount(init.catalog_count);
       setNameSchema(init.catalog_name_schema || 0);
       setCatalogWarnings(init.catalog_warnings || []);
@@ -558,7 +597,19 @@ function Workshop() {
               </button>
             </div>
           )}
-          {count > 0 && nameSchema < 1 && (
+          {catalogRebuildReason && (
+            <div className="notice">
+              <span>
+                {tr(
+                  "配件目录需要更新，当前仅供查看。请在设置中重新建立目录后再修改。",
+                )}
+              </span>
+              <button onClick={() => setPage("settings")}>
+                {tr("前往设置")}
+              </button>
+            </div>
+          )}
+          {count > 0 && nameSchema < 1 && !catalogRebuildReason && (
             <div className="notice">
               <span>
                 {tr(
@@ -643,6 +694,11 @@ function Workshop() {
                 </details>
               </div>
               {saveFilter}
+              {discoveryWarnings.map((warning) => (
+                <p className="inline-warning" key={warning}>
+                  <SourceMessage text={warning} />
+                </p>
+              ))}
               {opened && (
                 <p className="opened-save">
                   {tr("当前已打开：{name}", { name: openedSaveLabel })}
@@ -1175,7 +1231,11 @@ function Workshop() {
                             )}
                           <button
                             className="primary full"
-                            disabled={!selected || !!blockedReason}
+                            disabled={
+                              !selected ||
+                              !!blockedReason ||
+                              !!catalogRebuildReason
+                            }
                             onClick={() => task("校验改装规则", stage)}
                           >
                             <Plus size={16} />
@@ -1251,7 +1311,10 @@ function Workshop() {
               <div className="settings-grid">
                 <section className="card">
                   <h2>{tr("文件位置")}</h2>
-                  <button onClick={() => setShowSetup(true)}>
+                  <button
+                    disabled={operations.length > 0}
+                    onClick={() => setShowSetup(true)}
+                  >
                     <RefreshCw size={16} />
                     {tr("重新运行配置向导")}
                   </button>
@@ -1271,16 +1334,17 @@ function Workshop() {
                       />
                     </label>
                   ))}
+                  {operations.length > 0 && (
+                    <p className="inline-warning">
+                      {tr("请先保存或移除待保存修改，再更换游戏安装或重新配置")}
+                    </p>
+                  )}
                   <button
                     className="primary"
+                    disabled={changingGame && operations.length > 0}
                     onClick={() =>
                       task("保存设置", async () => {
-                        await rpc("settings", { settings });
-                        setCount(
-                          (await rpc<{ catalog_count: number }>("init"))
-                            .catalog_count,
-                        );
-                        setDefinitions(await rpc<Definition[]>("catalog"));
+                        await applySettings();
                         await refresh();
                         setNotice({ text: "设置已保存", error: false });
                       })
@@ -1321,7 +1385,7 @@ function Workshop() {
                       task(
                         "正在解包并索引游戏定义，首次运行可能需要数分钟",
                         async () => {
-                          await rpc("settings", { settings });
+                          const changedGame = await applySettings();
                           const r = await rpc<{
                             count: number;
                             warnings: string[];
@@ -1329,7 +1393,7 @@ function Workshop() {
                           setCount(r.count);
                           await refreshNameStatus();
                           setDefinitions(await rpc<Definition[]>("catalog"));
-                          if (opened) await open(opened.path);
+                          if (opened && !changedGame) await open(opened.path);
                           setNotice({
                             text: "已索引 {count} 个配件定义。目录仅涵盖已识别的官方资源。",
                             values: { count: r.count },
@@ -1504,6 +1568,11 @@ function Workshop() {
                   </select>
                 </label>
                 {saveFilter}
+                {discoveryWarnings.map((warning) => (
+                  <p className="inline-warning" key={warning}>
+                    <SourceMessage text={warning} />
+                  </p>
+                ))}
                 <button onClick={() => task("刷新游戏存档", refresh)}>
                   {tr("刷新存档列表")}
                 </button>
@@ -1621,10 +1690,9 @@ function Workshop() {
           initial={settings}
           onClose={firstSetup ? undefined : () => setShowSetup(false)}
           onComplete={async (s, n) => {
-            setOpened(null);
-            setOperations([]);
-            setPreview(null);
+            clearEditor();
             setSettings(s);
+            setSavedGame(s.game);
             setCount(n);
             setShowSetup(false);
             setFirstSetup(false);
@@ -1686,6 +1754,13 @@ function Workshop() {
             <div className="inline-warning">
               <CircleAlert size={17} />
               {tr("保存后需要在游戏中手动加载。改装升级可能恢复原厂配件。")}
+              {saveMode === "overwrite" && (
+                <span>
+                  {tr(
+                    "覆盖或恢复前，请退出游戏并暂停会写入该存档的同步及其他程序。",
+                  )}
+                </span>
+              )}
             </div>
             <button
               className="primary full"
@@ -1702,6 +1777,11 @@ function Workshop() {
         <div className="modal-backdrop">
           <section className="modal">
             <h2>{tr("恢复修改前的存档？")}</h2>
+            <p>
+              {tr(
+                "覆盖或恢复前，请退出游戏并暂停会写入该存档的同步及其他程序。",
+              )}
+            </p>
             <p>
               {tr(
                 "仅恢复车辆和游戏进度文件 game.sii，不删除存档槽，也不恢复名称、截图或 info.sii。 另存的槽位会保留新名称。恢复前会核对目标内容，新记录也会核对存档信息；发现更新则拒绝恢复。",

@@ -93,11 +93,14 @@ try {
               catalog_count: 2,
               data_dir: "synthetic-data",
               needs_setup: false,
+              catalog_rebuild_reason: null,
             };
           case "catalog":
             return [current, replacement];
           case "discover":
-            return [save];
+            return { saves: [save], warnings: [] };
+          case "settings":
+            return { settings: payload.settings, catalog_changed: false };
           case "history":
             return [];
           case "open":
@@ -169,19 +172,11 @@ try {
     "Switching does not reload backend or App",
   );
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Run setup again", exact: true })
-    .click();
-  await page.getByRole("dialog", { name: "First-run setup" }).waitFor();
-  await page
-    .locator(".onboarding .language-picker select")
-    .selectOption("zh-CN");
-  assert.equal(
-    await page.locator('input[list="detected-games"]').inputValue(),
-    "synthetic-game",
+  assert(
+    await page
+      .getByRole("button", { name: "Run setup again", exact: true })
+      .isDisabled(),
   );
-  await page.getByRole("button", { name: "取消", exact: true }).click();
-  await page.getByLabel("语言 / Language", { exact: true }).selectOption("en");
   await page.getByRole("button", { name: /^Garage/ }).click();
   await page.getByRole("button", { name: "Save changes" }).click();
   await page.locator(".modal input").fill("语言保留");
@@ -202,6 +197,20 @@ try {
   assert.equal(commit.operations.length, 1);
   assert.match(commit.operations[0].candidate_path, /mx13_390/);
   assert.equal(commit.name, "语言保留");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Run setup again", exact: true })
+    .click();
+  await page.getByRole("dialog", { name: "First-run setup" }).waitFor();
+  await page
+    .locator(".onboarding .language-picker select")
+    .selectOption("zh-CN");
+  assert.equal(
+    await page.locator('input[list="detected-games"]').inputValue(),
+    "synthetic-game",
+  );
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByLabel("语言 / Language", { exact: true }).selectOption("en");
   await page.reload();
   await page.getByRole("button", { name: "Open save", exact: true }).waitFor();
   assert.equal(

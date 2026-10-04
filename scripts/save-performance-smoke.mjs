@@ -6,6 +6,10 @@ import { resolve, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createCipheriv } from "node:crypto";
 import { deflateSync } from "node:zlib";
+import {
+  createSyntheticGame,
+  bindSyntheticCatalog,
+} from "./synthetic-catalog.mjs";
 
 // All saves are synthetic; no game or player files are modified.
 const baseline = process.argv.includes("--baseline");
@@ -14,6 +18,7 @@ const root = await mkdtemp(resolve("verification/save-perf-"));
 const app = join(root, "app"),
   docs = join(root, "game");
 await mkdir(app, { recursive: true });
+const installation = await createSyntheticGame(join(root, "installation"));
 function encryptedInfo(name) {
   const plain = Buffer.from(
     `SiiNunit {\nsave_container : info {\n name: "${name}"\n dependencies: 0\n}\n}\n`,
@@ -60,7 +65,7 @@ await writeFile(
   join(app, "settings.json"),
   JSON.stringify({
     documents: docs,
-    game: root,
+    game: installation,
     extractor: "",
     onboarding_version: 1,
   }),
@@ -89,6 +94,7 @@ await writeFile(
     name_schema: 1,
   }),
 );
+await bindSyntheticCatalog(join(app, "catalog.json"), installation);
 const port = 9236;
 const proc = spawn(
   resolve(
@@ -142,9 +148,10 @@ try {
   async function scan(include) {
     return page.evaluate(async (include) => {
       const start = performance.now();
-      const list = await window.__TAURI_INTERNALS__.invoke("rpc", {
+      const discovered = await window.__TAURI_INTERNALS__.invoke("rpc", {
         payload: { action: "discover", include_autosaves: include },
       });
+      const list = Array.isArray(discovered) ? discovered : discovered.saves;
       return {
         ms: Math.round(performance.now() - start),
         total: list.length,
