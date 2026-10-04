@@ -207,7 +207,7 @@ fn archive_source(pack: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
         .filter(|path| path.ends_with(".sii") || path.ends_with(".sui"))
         .cloned()
         .collect();
-    let mut attempted = std::collections::HashSet::new();
+    let mut scheduled: std::collections::HashSet<_> = pending.iter().cloned().collect();
     let mut bytes: usize = files.values().map(Vec::len).sum();
     while let Some(path) = pending.pop() {
         let Ok(text) = std::str::from_utf8(&files[&path]) else {
@@ -218,10 +218,13 @@ fn archive_source(pack: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
             .map(|cap| definition_include_path(&path, &cap[1]))
             .collect::<Result<Vec<_>>>()?;
         for child in includes {
-            if files.contains_key(&child) || !attempted.insert(child.clone()) {
+            if !scheduled.insert(child.clone()) {
                 continue;
             }
-            if let Some(data) = archive.read(&child)? {
+            if !files.contains_key(&child) {
+                let Some(data) = archive.read(&child)? else {
+                    continue;
+                };
                 bytes = bytes
                     .checked_add(data.len())
                     .ok_or("Catalog size overflow")?;
@@ -229,8 +232,10 @@ fn archive_source(pack: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
                     return Err("Catalog extraction exceeds size limit".into());
                 }
                 files.insert(child.clone(), data);
-                pending.push(child);
             }
+            // Already-loaded .inc (or other extension) files can themselves
+            // reference resources outside the selected trees.
+            pending.push(child);
         }
     }
     Ok(files)
@@ -503,7 +508,7 @@ fn game_packs(game: &Path) -> Result<Vec<PathBuf>> {
 
 // Separate from the public catalog schema: parser/selection changes explicitly
 // invalidate this rebuild cache without making existing catalogs unreadable.
-const BUILD_CACHE_VERSION: u32 = 1;
+const BUILD_CACHE_VERSION: u32 = 2;
 #[derive(Serialize, Deserialize)]
 struct BuildCache {
     version: u32,
@@ -654,6 +659,7 @@ pub fn build_with_progress(
     }
     progress("读取游戏中英文文本与配件属性");
     let (languages, name_warnings) = crate::localization::load_sources(game, &roots, &memory);
+    let cacheable_names = name_warnings.is_empty();
     let mut catalog = Catalog::scan_sources(&roots, &languages, &memory)?;
     catalog.name_schema = u32::from(
         languages.get("en").is_some_and(|words| !words.is_empty())
@@ -681,16 +687,20 @@ pub fn build_with_progress(
     if fingerprint != build_fingerprint(game, &game_packs(game)?)? {
         return Err("建立目录期间游戏资源发生变化，请等待游戏更新完成后重试".into());
     }
-    std::fs::create_dir_all(cache).map_err(|error| error.to_string())?;
-    crate::setup::write_atomic(
-        &cache_file,
-        &serde_json::to_vec(&BuildCache {
-            version: BUILD_CACHE_VERSION,
-            fingerprint,
-            catalog: catalog.clone(),
-        })
-        .map_err(|error| error.to_string())?,
-    )?;
+    // A temporary language read failure must be retried by Build / update.
+    // The partial result remains usable, but must not become a hot-cache hit.
+    if cacheable_names {
+        std::fs::create_dir_all(cache).map_err(|error| error.to_string())?;
+        crate::setup::write_atomic(
+            &cache_file,
+            &serde_json::to_vec(&BuildCache {
+                version: BUILD_CACHE_VERSION,
+                fingerprint,
+                catalog: catalog.clone(),
+            })
+            .map_err(|error| error.to_string())?,
+        )?;
+    }
     Ok(catalog)
 }
 
@@ -705,7 +715,8 @@ mod name_tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("root");
         let files = BTreeMap::<String, Vec<u8>>::from([
-            ("def/vehicle/engine.sii".into(), b"SiiNunit {\naccessory_engine_data : .test {\n@include \"/shared/engine.inc\"\n}\n}\n".to_vec()),
+            ("def/vehicle/engine.sii".into(), b"SiiNunit {\naccessory_engine_data : .test {\n@include \"../common.inc\"\n}\n}\n".to_vec()),
+            ("def/common.inc".into(), b"@include \"/shared/engine.inc\"\n".to_vec()),
             ("shared/engine.inc".into(), b"name: \"@@test@@\"\n@include \"../parameters/torque.inc\"\n".to_vec()),
             ("parameters/torque.inc".into(), b"torque: 2500\n".to_vec()),
             ("locale/en_gb/local.test.sii".into(), b"SiiNunit {\nlocalization_db : .l {\nkey[]: \"test\"\nval[]: \"DLC engine\"\n}\n}\n".to_vec()),
@@ -716,7 +727,7 @@ mod name_tests {
             std::fs::write(target, bytes).unwrap();
         }
         let root_listing = listing(&["/def", "/locale"]);
-        let def_listing = listing(&["/vehicle"]);
+        let def_listing = listing(&["/vehicle", "common.inc"]);
         let vehicle_listing = listing(&["engine.sii"]);
         let locale_listing = listing(&["/en_gb"]);
         let language_listing = listing(&["local.test.sii"]);
@@ -776,6 +787,7 @@ mod name_tests {
                 ("def/vehicle/engine.sii", 0x80, text.as_bytes(), 0x10),
             ])
         };
+        std::fs::write(game.join("locale.scs"), tree_fixture(&[])).unwrap();
         std::fs::write(game.join("def.scs"), pack("first")).unwrap();
         let cold = build(&game, &extractor, &cache).unwrap();
         let key = "/def/vehicle/engine.sii";
@@ -788,6 +800,16 @@ mod name_tests {
         assert_eq!(hot.signature, cold.signature);
         assert_eq!(hot_messages.borrow().len(), 1);
         assert!(hot_messages.borrow()[0].contains("复用"));
+        let cache_path = cache.join("parts-build-cache-v1.json");
+        let mut old: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
+        old["version"] = serde_json::json!(1);
+        old["catalog"]["definitions"][key]["name"] = serde_json::json!("stale parser result");
+        std::fs::write(&cache_path, serde_json::to_vec(&old).unwrap()).unwrap();
+        assert_eq!(
+            build(&game, &extractor, &cache).unwrap().definitions[key].name,
+            "first"
+        );
         std::fs::write(game.join("def.scs"), pack("changed name")).unwrap();
         assert_eq!(
             build(&game, &extractor, &cache).unwrap().definitions[key].name,
@@ -827,6 +849,76 @@ mod name_tests {
             build_fingerprint(&game, &game_packs(&game).unwrap()).unwrap(),
             "Same-second changes must invalidate the build cache"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locale_lock_does_not_cache_incomplete_names() {
+        use crate::game_archive::tests::{listing, tree_fixture};
+        use std::os::windows::fs::OpenOptionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        let root = listing(&["/def"]);
+        let def = listing(&["/vehicle"]);
+        let vehicle = listing(&["engine.sii"]);
+        let text = b"SiiNunit {\naccessory_engine_data : .test {\nname: \"@@engine@@\"\n}\n}\n";
+        std::fs::write(
+            game.join("def.scs"),
+            tree_fixture(&[
+                ("", 0x81, &root, 0),
+                ("def", 0x81, &def, 0),
+                ("def/vehicle", 0x81, &vehicle, 0),
+                ("def/vehicle/engine.sii", 0x80, text, 0),
+            ]),
+        )
+        .unwrap();
+        let locale =
+            b"SiiNunit {\nlocalization_db : .l {\nkey[]: \"engine\"\nval[]: \"Translated\"\n}\n}\n";
+        let locale_file = game.join("locale.scs");
+        std::fs::write(
+            &locale_file,
+            tree_fixture(&[
+                ("locale/en_gb/local.sii", 0x80, locale, 0),
+                ("locale/zh_cn/local.sii", 0x80, locale, 0),
+            ]),
+        )
+        .unwrap();
+        let original_time = std::fs::metadata(&locale_file).unwrap().modified().unwrap();
+        let extractor = tmp.path().join("unused-extractor.exe");
+        std::fs::write(&extractor, b"unused").unwrap();
+        let cache = tmp.path().join("cache");
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&locale_file)
+            .unwrap();
+        let incomplete = build(&game, &extractor, &cache).unwrap();
+        assert_eq!(incomplete.name_schema, 0);
+        assert!(incomplete.warnings.iter().any(|w| w.contains("未读取")));
+        assert!(!cache.join("parts-build-cache-v1.json").exists());
+        drop(lock);
+        assert_eq!(
+            std::fs::metadata(&locale_file).unwrap().modified().unwrap(),
+            original_time
+        );
+        let recovered = build(&game, &extractor, &cache).unwrap();
+        assert_eq!(recovered.name_schema, 1);
+        assert_eq!(
+            recovered.definitions["/def/vehicle/engine.sii"].name,
+            "Translated"
+        );
+        let messages = std::cell::RefCell::new(Vec::new());
+        let hot = build_with_progress(&game, &extractor, &cache, &|m| {
+            messages.borrow_mut().push(m.to_owned())
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(hot).unwrap(),
+            serde_json::to_value(recovered).unwrap()
+        );
+        assert_eq!(messages.borrow().len(), 1);
+        assert!(messages.borrow()[0].contains("复用"));
     }
 
     #[test]

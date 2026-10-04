@@ -407,7 +407,12 @@ pub fn validate_documents(documents: &Path) -> Result<()> {
 /// Successful names are cached; actual info bytes are checked on every scan.
 #[derive(Default)]
 pub struct SaveListCache {
-    names: HashMap<String, (String, String)>,
+    names: HashMap<String, CachedSaveName>,
+}
+struct CachedSaveName {
+    digest: String,
+    name: String,
+    is_autosave: bool,
 }
 fn info_bytes(path: &Path) -> Result<Vec<u8>> {
     const LIMIT: u64 = 256 * 1024 * 1024;
@@ -507,9 +512,9 @@ impl SaveListCache {
                     let result = (|| -> Result<String> {
                         let bytes = info_bytes(&info)?;
                         let digest = crate::hash(&bytes);
-                        if let Some((previous, name)) = self.names.get(&key) {
-                            if previous == &digest {
-                                return Ok(name.clone());
+                        if let Some(previous) = self.names.get(&key) {
+                            if previous.digest == digest {
+                                return Ok(previous.name.clone());
                             }
                         }
                         let doc = Document::parse(decode(&info, &bytes)?)?;
@@ -523,7 +528,14 @@ impl SaveListCache {
                         if crate::hash(&info_bytes(&info)?) != digest {
                             return Err("读取时存档信息发生变化，请刷新重试".into());
                         }
-                        self.names.insert(key.clone(), (digest, name.clone()));
+                        self.names.insert(
+                            key.clone(),
+                            CachedSaveName {
+                                digest,
+                                name: name.clone(),
+                                is_autosave,
+                            },
+                        );
                         Ok(name)
                     })();
                     let (name, error) = match result {
@@ -544,7 +556,11 @@ impl SaveListCache {
                 }
             }
         }
-        self.names.retain(|key, _| seen_saves.contains(key));
+        // A display filter must not discard names that were already decoded.
+        // Hidden autosaves are checked for changes/deletion when shown again.
+        self.names.retain(|key, cached| {
+            seen_saves.contains(key) || (!include_autosaves && cached.is_autosave)
+        });
         out.sort_by(|a, b| {
             b.modified
                 .cmp(&a.modified)
@@ -599,6 +615,44 @@ mod cache_tests {
             .unwrap();
         assert_eq!(calls.get(), 4);
     }
+    #[test]
+    fn hidden_autosaves_stay_warm_but_are_revalidated_when_shown() {
+        let root = tempfile::tempdir().unwrap();
+        let slot = save(root.path(), "autosave", "first");
+        let calls = Cell::new(0);
+        let decode = |_: &Path, bytes: &[u8]| {
+            calls.set(calls.get() + 1);
+            decoder::decode_direct(bytes)
+        };
+        let inputs = DiscoveryInputs::default();
+        let mut cache = SaveListCache::default();
+        for include in [true, true, false, true] {
+            let list = cache
+                .discover_with_decoder(root.path(), &inputs, include, &decode)
+                .unwrap();
+            assert_eq!(list.len(), usize::from(include));
+        }
+        assert_eq!(calls.get(), 1);
+        cache
+            .discover_with_decoder(root.path(), &inputs, false, &decode)
+            .unwrap();
+        save(root.path(), "autosave", "other");
+        let list = cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap();
+        assert_eq!(list[0].name, "other");
+        assert_eq!(calls.get(), 2);
+        cache
+            .discover_with_decoder(root.path(), &inputs, false, &decode)
+            .unwrap();
+        fs::remove_file(slot.join("game.sii")).unwrap();
+        assert!(cache
+            .discover_with_decoder(root.path(), &inputs, true, &decode)
+            .unwrap()
+            .is_empty());
+        assert!(cache.names.is_empty());
+    }
+
     #[test]
     fn cache_detects_same_timestamp_rewrites_missing_files_and_new_saves() {
         let root = tempfile::tempdir().unwrap();

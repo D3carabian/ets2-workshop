@@ -167,6 +167,7 @@ try {
   assert.equal(warm.count, 111);
   assert.equal(all.errors, 0);
   assert.equal(warm.errors, 0);
+  let toggleMs = null;
   if (!baseline) {
     const filter = page.getByRole("checkbox", { name: "包含自动存档" });
     assert.equal(await filter.isChecked(), false);
@@ -200,6 +201,23 @@ try {
     );
     assert.match(await page.locator(".opened-save").innerText(), /autosave/);
     assert.equal(await page.locator(".truck-card").count(), 1);
+    const toggleStart = performance.now();
+    await filter.check();
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll(".savebar select option")].filter((o) =>
+          o.value.replaceAll("\\", "/").includes("/profiles/fixture/save/"),
+        ).length === 111,
+    );
+    toggleMs = Math.round(performance.now() - toggleStart);
+    assert.match(await page.locator(".opened-save").innerText(), /autosave/);
+    await filter.uncheck();
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll(".savebar select option")].filter((o) =>
+          o.value.replaceAll("\\", "/").includes("/profiles/fixture/save/"),
+        ).length === 11,
+    );
     await page.reload();
     await page.waitForFunction(
       () =>
@@ -237,7 +255,7 @@ try {
       ),
       game,
     );
-  const result = { baseline, manual, all, warm };
+  const result = { baseline, manual, all, warm, toggleMs };
   await writeFile(join(root, "result.json"), JSON.stringify(result, null, 2));
   await writeFile(
     resolve(
