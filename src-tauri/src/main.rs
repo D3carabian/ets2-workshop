@@ -29,30 +29,13 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
     };
     match field(&v, "action")? {
         "init" => Ok(
-            json!({"settings":engine.settings,"catalog_count":engine.catalog.definitions.len(),"catalog_warnings":engine.catalog.warnings,"data_dir":storage::app_dir(),"needs_setup":engine.settings.onboarding_version!=workshop_core::setup::SETUP_VERSION}),
+            json!({"settings":engine.settings,"catalog_count":engine.catalog.definitions.len(),"catalog_warnings":engine.catalog.warnings,"data_dir":storage::app_dir(),"needs_setup":engine.settings.onboarding_version!=workshop_core::setup::SETUP_VERSION || engine.catalog.definitions.is_empty()}),
         ),
         "detect" => Ok(json!(workshop_core::setup::detect())),
         "setup" => {
-            let mut s: Settings =
+            let s: Settings =
                 serde_json::from_value(v["settings"].clone()).map_err(|e| e.to_string())?;
-            progress("正在检查游戏和存档目录…");
-            workshop_core::setup::validate(&s)?;
-            s.extractor = workshop_core::setup::ensure_extractor(progress)?
-                .to_string_lossy()
-                .into();
-            progress("正在建立配件目录，首次解包可能需要数分钟…");
-            let c = workshop_core::catalog::build(
-                Path::new(&s.game),
-                Path::new(&s.extractor),
-                &storage::app_dir(),
-            )?;
-            std::fs::write(
-                storage::app_dir().join("catalog.json"),
-                serde_json::to_vec(&c).unwrap(),
-            )
-            .map_err(|e| e.to_string())?;
-            s.onboarding_version = workshop_core::setup::SETUP_VERSION;
-            storage::save_settings(&s)?;
+            let (s, c) = workshop_core::setup::prepare(s, progress)?;
             engine.settings = s.clone();
             engine.catalog = c;
             engine.session = None;
@@ -64,7 +47,10 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
             workshop_core::setup::validate(&s)?;
             if s.game != engine.settings.game {
                 engine.catalog = Catalog::default();
-                let _ = std::fs::remove_file(storage::app_dir().join("catalog.json"));
+                let _ = std::fs::remove_file(storage::catalog_path(
+                    &engine.settings,
+                    &storage::app_dir(),
+                ));
             }
             storage::save_settings(&s)?;
             engine.settings = s;
@@ -111,7 +97,7 @@ fn request(engine: &mut Engine, v: Value, progress: &dyn Fn(&str)) -> Result<Val
             )?;
             std::fs::create_dir_all(storage::app_dir()).map_err(|e| e.to_string())?;
             std::fs::write(
-                storage::app_dir().join("catalog.json"),
+                storage::catalog_path(&engine.settings, &storage::app_dir()),
                 serde_json::to_vec(&c).unwrap(),
             )
             .map_err(|e| e.to_string())?;
@@ -167,7 +153,7 @@ fn main() {
         return;
     }
     let settings = storage::settings();
-    let catalog = std::fs::read(storage::app_dir().join("catalog.json"))
+    let catalog = std::fs::read(storage::catalog_path(&settings, &storage::app_dir()))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();

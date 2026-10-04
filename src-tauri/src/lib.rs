@@ -1,5 +1,6 @@
 pub mod catalog;
 pub mod decoder;
+pub mod discovery;
 pub mod edit;
 pub mod garage;
 pub mod runtime;

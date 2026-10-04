@@ -16,7 +16,7 @@
 4. 打开一个存档，选择卡车和要更换的配件，预览修改后保存。第一次尝试建议另存为新存档。
 5. 回到游戏，手动加载修改后的存档。之后可以在工具的改装记录中复查或恢复备份。
 
-不需要另外安装存档解密工具。如果电脑缺少 WebView2（用于显示应用界面的微软组件），启动器会提示安装。
+不需要另外安装存档解密工具。如果电脑缺少 WebView2（用于显示应用界面的微软组件），启动器会提供[微软官方下载页面](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)。请自行安装 Evergreen Standalone Installer（x64），完成后重新打开程序。
 
 ### 能改什么
 
@@ -59,7 +59,7 @@ For example, you can fit a Volvo engine to a Scania S, or increase its fuel capa
 4. Open a save, choose a truck and replacement parts, then review and save your changes. Saving to a new slot is recommended for your first attempt.
 5. Return to the game and load the edited save manually. You can later check your changes or restore a backup from the app's history page.
 
-No separate save decryption tool is needed. If WebView2, Microsoft's component for displaying the app interface, is missing, the launcher will offer to install it.
+No separate save decryption tool is needed. If WebView2, Microsoft's component for displaying the app interface, is missing, the launcher will direct you to [Microsoft's official download page](https://developer.microsoft.com/microsoft-edge/webview2/#download-section). Install the Evergreen Standalone Installer (x64) yourself, then reopen the app.
 
 ### What you can do
 

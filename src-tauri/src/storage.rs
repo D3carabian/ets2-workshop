@@ -19,6 +19,8 @@ pub struct Settings {
     pub extractor: String,
     #[serde(default)]
     pub onboarding_version: u32,
+    #[serde(default)]
+    pub catalog_file: String,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -43,6 +45,7 @@ impl Default for Settings {
             game,
             extractor: crate::setup::managed_extractor().to_string_lossy().into(),
             onboarding_version: 0,
+            catalog_file: String::new(),
         }
     }
 }
@@ -63,11 +66,21 @@ pub fn settings() -> Settings {
 }
 pub fn save_settings(s: &Settings) -> Result<()> {
     std::fs::create_dir_all(app_dir()).map_err(|e| e.to_string())?;
-    std::fs::write(
-        app_dir().join("settings.json"),
-        serde_json::to_vec_pretty(s).unwrap(),
+    crate::setup::write_atomic(
+        &app_dir().join("settings.json"),
+        &serde_json::to_vec_pretty(s).unwrap(),
     )
-    .map_err(|e| e.to_string())
+}
+pub fn catalog_path(s: &Settings, data: &Path) -> PathBuf {
+    // Only application-generated basenames are accepted from persisted settings.
+    if s.catalog_file.starts_with("catalog-")
+        && s.catalog_file.ends_with(".json")
+        && !s.catalog_file.contains(['/', '\\', ':'])
+    {
+        data.join(&s.catalog_file)
+    } else {
+        data.join("catalog.json")
+    }
 }
 #[derive(Clone, Serialize)]
 pub struct SaveEntry {
@@ -78,78 +91,13 @@ pub struct SaveEntry {
     pub error: Option<String>,
 }
 pub fn discover(s: &Settings) -> Result<Vec<SaveEntry>> {
-    let mut roots = vec![
-        PathBuf::from(&s.documents).join("profiles"),
-        PathBuf::from(&s.documents).join("steam_profiles"),
-    ];
-    for steam in crate::setup::steam_roots() {
-        if let Ok(users) = std::fs::read_dir(Path::new(&steam).join("userdata")) {
-            for u in users.flatten() {
-                roots.push(u.path().join("227300/remote/profiles"));
-            }
-        }
-    }
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for root in roots {
-        for e in walkdir::WalkDir::new(root)
-            .max_depth(4)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if e.file_name() != "info.sii" || !e.path().parent().unwrap().join("game.sii").exists()
-            {
-                continue;
-            }
-            let path = e.path().parent().unwrap().join("game.sii");
-            if !seen.insert(path.clone()) {
-                continue;
-            }
-            let profile = e
-                .path()
-                .ancestors()
-                .nth(3)
-                .and_then(|p| p.file_name())
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let modified = std::fs::metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let (name, error) = match decoder::read(e.path()).and_then(Document::parse) {
-                Ok(d) => (
-                    d.units
-                        .first()
-                        .and_then(|u| u.get("name"))
-                        .map(unquote)
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| {
-                            path.parent()
-                                .unwrap()
-                                .file_name()
-                                .unwrap()
-                                .to_string_lossy()
-                                .into()
-                        }),
-                    None,
-                ),
-                Err(e) => ("无法读取名称".into(), Some(e)),
-            };
-            out.push(SaveEntry {
-                path: path.to_string_lossy().into(),
-                name,
-                profile,
-                modified,
-                error,
-            });
-        }
-    }
-    out.sort_by_key(|s| std::cmp::Reverse(s.modified));
-    Ok(out)
+    discover_with(s, &crate::discovery::DiscoveryInputs::from_host())
+}
+pub fn discover_with(
+    s: &Settings,
+    inputs: &crate::discovery::DiscoveryInputs,
+) -> Result<Vec<SaveEntry>> {
+    crate::discovery::discover(Path::new(&s.documents), inputs)
 }
 pub fn has_mod_dependencies(info: &str) -> Result<bool> {
     if info.is_empty() {

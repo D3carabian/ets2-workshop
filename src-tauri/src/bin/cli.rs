@@ -4,7 +4,6 @@ fn run() -> workshop_core::Result<()> {
     let a: Vec<_> = std::env::args().collect();
     match a.get(1).map(String::as_str){
  Some("decode")=>{print!("{}",decoder::read(Path::new(&a[2]))?);Ok(())},
- Some("verify-runtime-installer")=>{let p=workshop_core::runtime::download_installer()?;println!("Microsoft signature verified: {}",p.display());std::fs::remove_file(p).map_err(|e|e.to_string())?;Ok(())},
  Some("runtime-status")=>{println!("{}",workshop_core::runtime::installed());Ok(())},
  Some("prepare-extractor")=>{println!("{}",workshop_core::setup::ensure_extractor(&|s|eprintln!("{s}"))?.display());Ok(())},
  Some("detect")=>{println!("{}",serde_json::to_string_pretty(&workshop_core::setup::detect()).unwrap());Ok(())},

@@ -1051,9 +1051,12 @@ export default function App() {
             setCount(n);
             setShowSetup(false);
             setFirstSetup(false);
-            setDefinitions(await rpc<Definition[]>("catalog"));
-            setReceipts(await rpc<Receipt[]>("history"));
-            await refresh();
+            // Setup is already committed. Keep post-setup read errors visible in the app.
+            await task("正在读取车库…", async () => {
+              setDefinitions(await rpc<Definition[]>("catalog"));
+              setReceipts(await rpc<Receipt[]>("history"));
+              await refresh();
+            });
           }}
         />
       )}

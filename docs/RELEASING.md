@@ -54,7 +54,7 @@ ZIP 检查限定入口、说明、许可清单及其声明的文件，核验许�
 
 ## 用户运行依赖
 
-ZIP 完整解压后运行 `ETS2 Workshop.exe`，不要单独移动 EXE；无需安装 Node、Rust 或 Truck Tools。Tauri 界面需要 **Microsoft Edge WebView2 Evergreen Runtime**。启动器检测该运行时，缺少时通过原生提示引导下载 Microsoft 官方安装器、验证签名并安装，再启动 `workshop-app.exe`。该流程需要网络，不能保证首次离线可用。也可手动安装 [Microsoft 官方 WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)。
+ZIP 完整解压后运行 `ETS2 Workshop.exe`，不要单独移动 EXE；无需安装 Node、Rust 或 Truck Tools。Tauri 界面需要 **Microsoft Edge WebView2 Evergreen Runtime**。启动器检测该运行时，缺少时显示[微软官方下载页面](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)，提示用户自行安装 Evergreen Standalone Installer（x64），完成后重新打开程序。应用不下载或执行运行时安装器；已安装运行时的启动不需要联网。检测与提示的验证方法见 [WebView2 验证](RUNTIME_VALIDATION.md)。
 
 目前 ZIP 不包含代码签名；Windows 的来源提示与存档兼容性是不同的问题。首次配置与游戏内修改验证仍需要人工检查；CI 通过不代表所有游戏版本和配件组合均已验证。
 
