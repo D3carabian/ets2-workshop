@@ -61,7 +61,7 @@ test("translation preserves unknown source text and user values without interpre
 });
 
 test("explicit UI translation keys have English text", async () => {
-  for (const filename of ["App.tsx", "Onboarding.tsx"]) {
+  for (const filename of ["App.tsx", "Onboarding.tsx", "TitleBar.tsx", "ChangeReview.tsx"]) {
     const contents = await readFile(
       new URL(`../src/${filename}`, import.meta.url),
       "utf8",

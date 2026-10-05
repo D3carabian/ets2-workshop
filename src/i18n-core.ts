@@ -3,6 +3,47 @@ export type TextValues = Record<string, string | number>;
 export const LANGUAGE_STORAGE_KEY = "ets2-workshop.language";
 
 const english: Record<string, string> = {
+  // Cockpit UI
+  跟随系统: "Follow system",
+  "选择跟随系统、日间或夜间模式，选择会自动记住。":
+    "Follow your system, or choose day or night mode. Your preference is saved automatically.",
+  最后确认: "FINAL REVIEW",
+  保存时自动备份: "Backed up when saving",
+  "确认全部变更后，一并保存到存档。":
+    "Review all changes, then save them together.",
+  没有待保存的修改: "No pending changes",
+  继续改装: "Continue editing",
+  正在处理修改: "Changes are being processed",
+  还有修改没有保存: "You have unsaved changes",
+  "请等待当前操作完成，再退出。":
+    "Wait for the current operation to finish before exiting.",
+  "本次改装尚未写入存档。可以返回变更清单，确认后一起保存。":
+    "Your changes have not been saved. Return to the change list to review and save them together.",
+  不保存并退出: "Discard and exit",
+  返回变更清单: "Review changes",
+  变更预览: "Change preview",
+  "另有 {count} 项修改": "{count} more changes",
+  查看全部变更: "View all changes",
+  "窗口操作失败：{error}": "Window action failed: {error}",
+  外观: "Appearance",
+  界面模式: "Interface mode",
+  日间模式: "Day mode",
+  夜间模式: "Night mode",
+  "选择日间或夜间模式，选择会自动记住。":
+    "Choose day or night mode. Your preference is saved automatically.",
+  选择: "Select",
+  加入: "Stage",
+  收起: "Collapse",
+  展开: "Expand",
+  待保存: "Pending",
+  最小化: "Minimize",
+  最大化: "Maximize",
+  关闭窗口: "Close window",
+  未打开存档: "No save open",
+  "已识别 {known} · 只读 {unknown}": "{known} identified · {unknown} read-only",
+  "待保存 {count}": "{count} pending",
+  "当前 → 候选": "Current → candidate",
+  "原 {value}": "was {value}",
   "需要解包时，自动从 SCS 官方获取工具并校验":
     "When extraction is needed, download and verify the official SCS tool automatically",
   "仅支持原版及官方 DLC，不支持 Mod 存档。直接读取不需要下载工具；遇到需要解包的归档时，请保持联网并预留磁盘空间。":

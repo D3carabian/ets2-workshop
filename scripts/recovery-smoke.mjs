@@ -151,10 +151,14 @@ try {
     .filter({ hasText: "synthetic-engine-b" })
     .click();
   await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
-  await page.locator(".changes .change").waitFor();
-  await page.getByRole("button", { name: /保存修改/ }).click();
-  await page.locator(".modal input").fill("Phase3 合成另存");
-  await page.getByRole("button", { name: "确认保存", exact: true }).click();
+  await page.locator(".status-pending.has-pending").waitFor();
+  assert.equal(await page.locator(".changes").count(), 0);
+  await page.locator(".titlebar-save").click();
+  const review = page.locator(".modal.change-review");
+  await review.locator(".changes .change").waitFor();
+  assert.equal(await review.locator(".change").count(), 1);
+  await review.locator("input").fill("Phase3 合成另存");
+  await review.getByRole("button", { name: /^确认保存/ }).click();
   await page
     .locator(".notice.success")
     .filter({ hasText: "已保存为 Phase3 合成另存" })

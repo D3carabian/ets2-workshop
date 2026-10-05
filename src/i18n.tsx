@@ -13,7 +13,6 @@ import {
   type Locale,
   type TextValues,
 } from "./i18n-core";
-import "./language.css";
 export { translate, type Locale, type TextValues } from "./i18n-core";
 
 type Language = {

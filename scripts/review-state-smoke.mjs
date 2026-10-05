@@ -276,7 +276,9 @@ try {
       .getByRole("button", { name: "加入变更清单", exact: true })
       .click();
     await page.waitForFunction(
-      (count) => document.querySelectorAll(".changes .change").length === count,
+      (count) =>
+        Number(document.querySelector(".titlebar-save b")?.textContent) ===
+        count,
       index + 1,
     );
   }
@@ -304,6 +306,7 @@ try {
   await page.screenshot({ path: join(root, "pending-switch-blocked.png") });
 
   await page.getByRole("button", { name: /^车库/ }).click();
+  await page.locator(".titlebar-save").click();
   for (const count of [1, 0]) {
     await page
       .getByRole("button", { name: "移除此修改", exact: true })
@@ -315,6 +318,7 @@ try {
     );
   }
   // Settings publication failure must preserve backend settings, catalog and open session.
+  await page.getByRole("button", { name: "继续改装", exact: true }).click();
   const priorGenerations = await generations();
   const unlock = await lockSettings();
   try {

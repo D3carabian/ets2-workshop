@@ -4,6 +4,8 @@
 
 解码后 SHA256：`f7160d049b6104616373346bfd9fbf01d78a9f2a43985ef9a78521061e7ed9a8`。
 
+`cockpit-preview.html` 与 `cockpit-mock.js` 为 Cockpit 的纯浏览器合成 UI 夹具，改编自用户提供的界面设计包；不连接原生后端，不读取或写入存档，数据为手工构造。由 `cockpit-ui-smoke.mjs` 使用，不进入生产构建。
+
 源文件路径：`def/vehicle/truck/synthetic/engine/test.sii`，内容为：
 
 ```text

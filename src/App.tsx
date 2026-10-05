@@ -1,13 +1,17 @@
 import {
   LanguageProvider,
-  LanguagePicker,
   SourceMessage,
   useLanguage,
   type TextValues,
 } from "./i18n";
 import Onboarding from "./Onboarding";
-import "./garage.css";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { TitleBar } from "./TitleBar";
+import { Readout } from "./Readout";
+import { ChangeReview } from "./ChangeReview";
+import { Dialog } from "./Dialog";
+import { useCloseGuard } from "./useCloseGuard";
+import { useTheme } from "./theme";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Truck as TruckIcon,
@@ -29,6 +33,9 @@ import {
   Save,
   Database,
   Undo2,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import type {
   Settings,
@@ -82,6 +89,7 @@ export default function App() {
 }
 
 function Workshop() {
+  const { theme, setTheme } = useTheme();
   const { t: tr, locale } = useLanguage();
   const partLocale = locale === "en" ? "en" : "zh";
   const [page, setPage] = useState("garage");
@@ -110,25 +118,6 @@ function Workshop() {
   const [savePath, setSavePath] = useState("");
   const [manualPath, setManualPath] = useState("");
   const [opened, setOpened] = useState<Opened | null>(null);
-  const garageRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const grid = garageRef.current;
-    if (!grid) return;
-    const resize = () => {
-      const top = grid.getBoundingClientRect().top + window.scrollY;
-      const height = `${Math.max(240, window.innerHeight - top - 16)}px`;
-      if (grid.style.getPropertyValue("--garage-height") !== height)
-        grid.style.setProperty("--garage-height", height);
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(grid.closest("main")!);
-    window.addEventListener("resize", resize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", resize);
-    };
-  }, [page, !!opened]);
   const [truckId, setTruckId] = useState("");
   const [fleetQuery, setFleetQuery] = useState("");
   const [fleetPage, setFleetPage] = useState(0);
@@ -482,7 +471,6 @@ function Workshop() {
         name: newName,
       });
     } catch (e) {
-      setSaveModal(false);
       try {
         setReceipts(await rpc<Receipt[]>("history"));
       } catch {
@@ -491,6 +479,7 @@ function Workshop() {
       throw e;
     }
     setSaveModal(false);
+    setExitPrompt(false);
     setOpened(null);
     setOperations([]);
     setPreview(null);
@@ -538,44 +527,127 @@ function Workshop() {
     ["history", "备份与恢复", History],
     ["settings", "设置", Settings2],
   ] as const;
+  const { exitPrompt, setExitPrompt, requestClose, discardAndClose } =
+    useCloseGuard(operations.length, !!busy, (error) =>
+      setNotice({
+        text: "窗口操作失败：{error}",
+        values: { error: String(error) },
+        error: true,
+      }),
+    );
+  // Cockpit keyboard: Up/Down move the candidate selection, Enter stages it.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (
+        page !== "garage" ||
+        busy ||
+        saveModal ||
+        exitPrompt ||
+        restoreId ||
+        showSetup
+      )
+        return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName || "";
+      if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag) || el?.isContentEditable)
+        return;
+      if (!truck || (action === "replace" && !part)) return;
+      const pageItems = visibleCandidates.slice(
+        candidatePage * 50,
+        (candidatePage + 1) * 50,
+      );
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        if (!pageItems.length) return;
+        e.preventDefault();
+        const i = pageItems.findIndex((c) => c.key === chosen);
+        const next =
+          e.key === "ArrowDown"
+            ? Math.min(i + 1, pageItems.length - 1)
+            : Math.max(i - 1, 0);
+        setChosen(pageItems[next].key);
+      } else if (e.key === "Enter") {
+        if (
+          (tag === "BUTTON" && !el?.closest(".candidate")) ||
+          tag === "SUMMARY"
+        )
+          return;
+        if (!selected || catalogRebuildReason) return;
+        e.preventDefault();
+        void task("校验改装规则", stage);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  useEffect(() => {
+    document
+      .querySelector(".candidates .candidate.selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [chosen]);
+  const pageLabel = tr(tabs.find(([id]) => id === page)?.[1] || "车库");
+  const pendingFor = (id: string) =>
+    operations.filter((o) => o.truck_id === id).length;
+  const pendingAccessory = (id: string) =>
+    !!truck &&
+    operations.some(
+      (o) =>
+        o.action === "replace" &&
+        o.truck_id === truck.id &&
+        o.accessory_id === id,
+    );
+  const knownParts = truck?.accessories.filter((a) => a.definition).length ?? 0;
+  const openSaveModal = () => {
+    setNewName((name) => name ?? newSaveName());
+    setSaveModal(true);
+  };
+  const returnToReview = () => {
+    setExitPrompt(false);
+    setRestoreId("");
+    openSaveModal();
+  };
   return (
     <div className="app">
+      <TitleBar
+        pageLabel={pageLabel}
+        saveLabel={opened ? openedSaveLabel : ""}
+        pending={operations.length}
+        saveDisabled={
+          !operations.length ||
+          !!busy ||
+          saveModal ||
+          exitPrompt ||
+          !!restoreId ||
+          showSetup
+        }
+        onSave={openSaveModal}
+        onClose={requestClose}
+        summary={
+          preview?.changes.map((change) => ({
+            model: friendly(change.model),
+            category: tr(labels[change.category] || change.category),
+            before: change.before ? displayPath(change.before) : tr("新增"),
+            after: displayPath(change.after),
+          })) ?? []
+        }
+      />
       <aside className="rail">
-        <div className="brand">
-          <div className="brand-icon">
-            <img src="/logo-c.png" alt="" />
-          </div>
-          <div>
-            ETS2<span>WORKSHOP</span>
-          </div>
-        </div>
-        <div className="rail-label">{tr("本地改装工作台")}</div>
         <nav>
           {tabs.map(([id, label, Icon]) => (
             <button
               key={id}
               className={page === id ? "nav active" : "nav"}
+              aria-label={tr(label)}
+              title={tr(label)}
               onClick={() => setPage(id)}
             >
               <Icon size={19} />
-              {tr(label)}
+              <span className="sr-only">{tr(label)}</span>
               {id === "garage" && opened && <small>{trucks.length}</small>}
             </button>
           ))}
         </nav>
-        <div className="rail-bottom">
-          <div>
-            <span>{__APP_VERSION__}</span>
-            <span className="preview-label"> / PUBLIC PREVIEW</span>
-          </div>
-        </div>
       </aside>
       <main>
-        <header>
-          <div className="header-right">
-            <LanguagePicker />
-          </div>
-        </header>
         <fieldset disabled={!!busy} className="workspace">
           {notice && (
             <div
@@ -632,29 +704,67 @@ function Workshop() {
             </div>
           )}
           {page === "garage" && (
-            <>
-              <div className="page-title">
-                <div>
-                  <div className="eyebrow">YOUR FLEET</div>
-                  <h1>{tr("每辆卡车，都有自己的配置。")}</h1>
-                  <p>
-                    {tr(
-                      "选择车辆，查看配件。修改先进入清单，保存时才会写入存档。",
-                    )}
-                  </p>
+            <div className="garage-page">
+              <h1 className="sr-only">{tr("每辆卡车，都有自己的配置。")}</h1>
+              <div className="sessionbar">
+                <div className="savebar">
+                  <FolderOpen size={18} />
+                  <select
+                    aria-label={tr("选择存档")}
+                    value={savePath}
+                    onChange={(e) => setSavePath(e.target.value)}
+                  >
+                    <option value="">{tr("选择一个存档")}</option>
+                    {saves.map((s) => (
+                      <option key={s.path} value={s.path}>
+                        {s.name} ·{" "}
+                        {new Date(s.modified * 1000).toLocaleString()} ·{" "}
+                        {s.profile}
+                        {s.is_autosave ? ` · ${tr("自动存档")}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => task("读取并解密存档", () => open(savePath))}
+                    disabled={!savePath}
+                  >
+                    {tr("打开存档")}
+                    <ArrowRight size={15} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title={tr("刷新存档列表")}
+                    onClick={() => task("刷新存档列表", refresh)}
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                  <details>
+                    <summary>{tr("手动路径")}</summary>
+                    <div className="path-entry">
+                      <input
+                        aria-label={tr("game.sii 路径")}
+                        placeholder={tr("粘贴 game.sii 的完整路径")}
+                        value={manualPath}
+                        onChange={(e) => setManualPath(e.target.value)}
+                      />
+                      <button
+                        disabled={!manualPath}
+                        onClick={() =>
+                          task("打开指定文件", () => open(manualPath))
+                        }
+                      >
+                        {tr("打开")}
+                      </button>
+                    </div>
+                  </details>
                 </div>
-                <button
-                  className="primary"
-                  disabled={!operations.length}
-                  onClick={() => {
-                    setNewName((name) => name ?? newSaveName());
-                    setSaveModal(true);
-                  }}
-                >
-                  <Save size={17} />
-                  {tr("保存修改")}
-                  {operations.length > 0 && <b>{operations.length}</b>}
-                </button>
+                {saveFilter}
+                {opened && (
+                  <p className="opened-save">
+                    <span className="dot" />
+                    {tr("当前已打开：{name}", { name: openedSaveLabel })}
+                  </p>
+                )}
               </div>
               {lastBackup?.state === "completed" && (
                 <section className="backup-status" role="status">
@@ -675,73 +785,23 @@ function Workshop() {
                   </button>
                 </section>
               )}
-              <div className="savebar">
-                <FolderOpen size={20} />
-                <select
-                  aria-label={tr("选择存档")}
-                  value={savePath}
-                  onChange={(e) => setSavePath(e.target.value)}
-                >
-                  <option value="">{tr("选择一个存档")}</option>
-                  {saves.map((s) => (
-                    <option key={s.path} value={s.path}>
-                      {s.name} · {new Date(s.modified * 1000).toLocaleString()}{" "}
-                      · {s.profile}
-                      {s.is_autosave ? ` · ${tr("自动存档")}` : ""}
-                    </option>
+              {(discoveryWarnings.length > 0 ||
+                (opened?.warnings.length ?? 0) > 0) && (
+                <div className="session-warnings">
+                  {discoveryWarnings.map((warning) => (
+                    <p className="inline-warning" key={warning}>
+                      <CircleAlert size={15} />
+                      <SourceMessage text={warning} />
+                    </p>
                   ))}
-                </select>
-                <button
-                  onClick={() => task("读取并解密存档", () => open(savePath))}
-                  disabled={!savePath}
-                >
-                  {tr("打开存档")}
-                  <ArrowRight size={15} />
-                </button>
-                <button
-                  className="icon-button"
-                  title={tr("刷新存档列表")}
-                  onClick={() => task("刷新存档列表", refresh)}
-                >
-                  <RefreshCw size={17} />
-                </button>
-                <details>
-                  <summary>{tr("手动路径")}</summary>
-                  <div className="path-entry">
-                    <input
-                      aria-label={tr("game.sii 路径")}
-                      placeholder={tr("粘贴 game.sii 的完整路径")}
-                      value={manualPath}
-                      onChange={(e) => setManualPath(e.target.value)}
-                    />
-                    <button
-                      disabled={!manualPath}
-                      onClick={() =>
-                        task("打开指定文件", () => open(manualPath))
-                      }
-                    >
-                      {tr("打开")}
-                    </button>
-                  </div>
-                </details>
-              </div>
-              {saveFilter}
-              {discoveryWarnings.map((warning) => (
-                <p className="inline-warning" key={warning}>
-                  <SourceMessage text={warning} />
-                </p>
-              ))}
-              {opened && (
-                <p className="opened-save">
-                  {tr("当前已打开：{name}", { name: openedSaveLabel })}
-                </p>
-              )}
-              {opened?.warnings.map((w) => (
-                <div className="inline-warning" key={w}>
-                  <CircleAlert size={15} />
-                  {<SourceMessage text={w} />}
+                  {opened?.warnings.map((w) => (
+                    <div className="inline-warning" key={w}>
+                      <CircleAlert size={15} />
+                      {<SourceMessage text={w} />}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
               {!opened ? (
                 <div className="empty welcome">
                   <div className="welcome-icon">
@@ -778,14 +838,11 @@ function Workshop() {
                 </div>
               ) : (
                 <>
-                  <div className="garage-grid" ref={garageRef}>
+                  <div className="garage-grid">
                     <section className="fleet" aria-label={tr("车库列表")}>
                       <div className="section-head">
                         <h2>{tr("我的卡车")}</h2>
-                        <span>
-                          {trucks.length}
-                          {tr("辆")}
-                        </span>
+                        <span>{trucks.length}</span>
                       </div>
                       <label className="search">
                         <Search size={16} />
@@ -852,34 +909,42 @@ function Workshop() {
                                 setFilter("all");
                               }}
                             >
-                              <div className="truck-card-top">
-                                <TruckIcon size={23} />
+                              <span
+                                className={
+                                  "truck-status" + (t.current ? " current" : "")
+                                }
+                              />
+                              <strong>{friendly(t.model)}</strong>
+                              <span className="truck-side">
+                                {pendingFor(t.id) > 0 && (
+                                  <span className="pending-count">
+                                    ●{pendingFor(t.id)}
+                                  </span>
+                                )}
                                 {t.current && (
                                   <span className="tag">{tr("正在驾驶")}</span>
                                 )}
-                              </div>
-                              <strong>{friendly(t.model)}</strong>
-                              <div className="plate">
-                                {t.plate || tr("未设置车牌")}
-                              </div>
-                              <span className="truck-driver">
-                                {t.current || t.driver?.kind === "player"
-                                  ? tr("驾驶员：玩家")
-                                  : t.driver?.kind === "employee"
-                                    ? tr("雇员：{name}", {
-                                        name:
-                                          t.driver.name ||
-                                          t.driver.id ||
-                                          tr("编号未知"),
-                                      })
-                                    : t.driver?.kind === "unassigned"
-                                      ? tr("未分配驾驶员")
-                                      : tr("驾驶员未识别")}
                               </span>
-                              <small>
-                                {t.accessories.length}
-                                {tr("个配件")} <ChevronRight size={13} />
-                              </small>
+                              <span className="truck-meta">
+                                <span className="plate">
+                                  {t.plate || tr("未设置车牌")}
+                                </span>
+                                {" · "}
+                                <span className="truck-driver">
+                                  {t.current || t.driver?.kind === "player"
+                                    ? tr("驾驶员：玩家")
+                                    : t.driver?.kind === "employee"
+                                      ? tr("雇员：{name}", {
+                                          name:
+                                            t.driver.name ||
+                                            t.driver.id ||
+                                            tr("编号未知"),
+                                        })
+                                      : t.driver?.kind === "unassigned"
+                                        ? tr("未分配驾驶员")
+                                        : tr("驾驶员未识别")}
+                                </span>
+                              </span>
                             </button>
                           ))}
                       </div>
@@ -940,7 +1005,8 @@ function Workshop() {
                               "part-row " +
                               (part?.id === a.id && action === "replace"
                                 ? "selected"
-                                : "")
+                                : "") +
+                              (a.definition ? "" : " unknown")
                             }
                             onClick={() => selectPart(a)}
                           >
@@ -975,6 +1041,13 @@ function Workshop() {
                                 }
                               </small>
                             </span>
+                            {pendingAccessory(a.id) ? (
+                              <span className="tag pending">
+                                {tr("待保存")}
+                              </span>
+                            ) : (
+                              <span />
+                            )}
                             <ChevronRight size={15} />
                           </button>
                         ))}
@@ -1095,6 +1168,11 @@ function Workshop() {
                                   }
                                 </span>
                               </div>
+                              <Readout
+                                category={part!.category}
+                                before={part!.definition}
+                                after={selected?.definition}
+                              />
                               <details className="current-metrics">
                                 <summary>{tr("当前配件全部参数")}</summary>
                                 <Metrics def={part!.definition} />
@@ -1120,6 +1198,7 @@ function Workshop() {
                           )}
                           {readOnlyReason && (
                             <p className="inline-warning">
+                              <CircleAlert size={15} />
                               {tr(readOnlyReason)}
                             </p>
                           )}
@@ -1287,71 +1366,36 @@ function Workshop() {
                             blockedReason &&
                             blockedReason !== readOnlyReason && (
                               <p className="inline-warning">
+                                <CircleAlert size={15} />
                                 {tr(blockedReason)}
                               </p>
                             )}
-                          <button
-                            className="primary full stage-button"
-                            disabled={!selected || !!catalogRebuildReason}
-                            onClick={() => task("校验改装规则", stage)}
-                          >
-                            <Plus size={16} />
-                            {tr("加入变更清单")}
-                          </button>
+                          <div className="inspector-actions">
+                            <button
+                              className="primary full stage-button"
+                              disabled={!selected || !!catalogRebuildReason}
+                              onClick={() => task("校验改装规则", stage)}
+                            >
+                              <Plus size={16} />
+                              {tr("加入变更清单")}
+                            </button>
+                            <span className="kbd-hint">
+                              <kbd>↑</kbd>
+                              <kbd>↓</kbd>
+                              {tr("选择")} · <kbd>Enter</kbd>
+                              {tr("加入")}
+                            </span>
+                          </div>
                         </>
                       )}
                     </section>
                   </div>
-                  {preview && operations.length > 0 && (
-                    <section className="changes">
-                      <div className="section-head">
-                        <h2>
-                          {tr("待保存的修改")}{" "}
-                          <span className="tag">{operations.length}</span>
-                        </h2>
-                        <span className="backup-reminder">
-                          <ShieldCheck size={16} />
-                          {tr("尚未写入，保存时自动备份原存档")}
-                        </span>
-                      </div>
-                      {preview.changes.map((c, n) => (
-                        <div className="change" key={n}>
-                          <span>
-                            {friendly(c.model)}
-                            <small>
-                              {tr(labels[c.category] || c.category)}
-                            </small>
-                          </span>
-                          <code>
-                            {c.before ? displayPath(c.before) : tr("新增")}
-                          </code>
-                          <ArrowRight size={16} />
-                          <code>{displayPath(c.after)}</code>
-                          <button
-                            className="icon-button"
-                            aria-label={tr("移除此修改")}
-                            onClick={() =>
-                              task("更新清单", () => removeOperation(n))
-                            }
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ))}
-                      {preview.warnings.map((w, i) => (
-                        <p className="inline-warning" key={i}>
-                          <CircleAlert size={15} />
-                          {<SourceMessage text={w} />}
-                        </p>
-                      ))}
-                    </section>
-                  )}
                 </>
               )}
-            </>
+            </div>
           )}
           {page === "settings" && (
-            <>
+            <div className="page">
               <div className="page-title">
                 <div>
                   <div className="eyebrow">LOCAL CONFIGURATION</div>
@@ -1363,6 +1407,43 @@ function Workshop() {
                   </p>
                 </div>
               </div>
+              <section
+                className="card appearance-settings"
+                aria-labelledby="appearance-heading"
+              >
+                <h2 id="appearance-heading">{tr("外观")}</h2>
+                <p>{tr("选择跟随系统、日间或夜间模式，选择会自动记住。")}</p>
+                <div
+                  className="theme-options"
+                  role="group"
+                  aria-label={tr("界面模式")}
+                >
+                  <button
+                    aria-pressed={theme === "system"}
+                    onClick={() => setTheme("system")}
+                  >
+                    <Monitor size={18} />
+                    {tr("跟随系统")}
+                    {theme === "system" && <Check size={16} />}
+                  </button>
+                  <button
+                    aria-pressed={theme === "light"}
+                    onClick={() => setTheme("light")}
+                  >
+                    <Sun size={18} />
+                    {tr("日间模式")}
+                    {theme === "light" && <Check size={16} />}
+                  </button>
+                  <button
+                    aria-pressed={theme === "dark"}
+                    onClick={() => setTheme("dark")}
+                  >
+                    <Moon size={18} />
+                    {tr("夜间模式")}
+                    {theme === "dark" && <Check size={16} />}
+                  </button>
+                </div>
+              </section>
               <div className="settings-grid">
                 <section className="card">
                   <h2>{tr("文件位置")}</h2>
@@ -1472,10 +1553,10 @@ function Workshop() {
                   </details>
                 </section>
               </div>
-            </>
+            </div>
           )}
           {page === "catalog" && (
-            <>
+            <div className="page">
               <div className="page-title">
                 <div>
                   <div className="eyebrow">PARTS LIBRARY</div>
@@ -1582,10 +1663,10 @@ function Workshop() {
                   {tr("下一页")}
                 </button>
               </div>
-            </>
+            </div>
           )}
           {page === "history" && (
-            <>
+            <div className="page">
               <div className="page-title">
                 <div>
                   <div className="eyebrow">BACKUPS & RESTORE</div>
@@ -1761,10 +1842,50 @@ function Workshop() {
                   </p>
                 </div>
               )}
-            </>
+            </div>
           )}
         </fieldset>
       </main>
+      <div className="statusbar">
+        <span className="status-path" title={opened?.path}>
+          {opened ? opened.path : tr("未打开存档")}
+        </span>
+        {opened && truck && (
+          <span>
+            {tr("已识别 {known} · 只读 {unknown}", {
+              known: knownParts,
+              unknown: truck.accessories.filter((accessory) =>
+                replacementReason(accessory),
+              ).length,
+            })}
+          </span>
+        )}
+        <span className="status-spacer" />
+        <button
+          className={
+            "status-pending" + (operations.length ? " has-pending" : "")
+          }
+          disabled={
+            !operations.length ||
+            !!busy ||
+            saveModal ||
+            exitPrompt ||
+            !!restoreId ||
+            showSetup
+          }
+          onClick={openSaveModal}
+        >
+          ● {tr("待保存 {count}", { count: operations.length })}
+        </button>
+        <span>
+          {count.toLocaleString()} {tr("个配件定义")}
+        </span>
+        <span className="status-backup">
+          <span className="dot" />
+          {tr("自动备份")}
+        </span>
+        <span className="rail-bottom">{__APP_VERSION__} / PUBLIC PREVIEW</span>
+      </div>
       {showSetup && (
         <Onboarding
           initial={settings}
@@ -1792,66 +1913,57 @@ function Workshop() {
           {tr(busy)}
         </div>
       )}
-      {saveModal && (
-        <div className="modal-backdrop">
-          <section className="modal">
-            <div className="section-head">
-              <h2>{tr("保存这次改装")}</h2>
-              <button
-                aria-label={tr("关闭")}
-                disabled={!!busy}
-                onClick={() => setSaveModal(false)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p>
-              {operations.length}{" "}
-              {tr("项变更已通过结构和操作规则检查。保存前自动备份。")}
-            </p>
-            <label>
-              {tr("保存方式")}
-              <select
-                disabled={!!busy}
-                value={saveMode}
-                onChange={(e) => setSaveMode(e.target.value)}
-              >
-                <option value="new">{tr("另存为新存档（推荐）")}</option>
-                <option value="overwrite">{tr("备份并覆盖当前存档")}</option>
-              </select>
-            </label>
-            {saveMode === "new" && (
-              <label>
-                {tr("新存档名称")}
-                <input
-                  disabled={!!busy}
-                  value={newName ?? ""}
-                  onChange={(e) => setNewName(e.target.value)}
-                  maxLength={80}
-                />
-              </label>
-            )}
-            <div className="inline-warning">
-              <CircleAlert size={17} />
-              {tr("保存后需要在游戏中手动加载。改装升级可能恢复原厂配件。")}
-              {saveMode === "overwrite" && (
-                <span>
-                  {tr(
-                    "覆盖或恢复前，请退出游戏并暂停会写入该存档的同步及其他程序。",
-                  )}
-                </span>
-              )}
-            </div>
-            <button
-              className="primary full"
-              disabled={!!busy}
-              onClick={() => task("备份、校验并写入存档", save)}
-            >
-              <Save size={17} />
-              {tr("确认保存")}
+      {saveModal && !exitPrompt && (
+        <ChangeReview
+          preview={preview}
+          busy={!!busy}
+          saveMode={saveMode}
+          setSaveMode={setSaveMode}
+          newName={newName ?? ""}
+          setNewName={setNewName}
+          displayPath={displayPath}
+          onRemove={(index) =>
+            void task("更新清单", () => removeOperation(index))
+          }
+          onSave={() => void task("备份、校验并写入存档", save)}
+          onDismiss={() => setSaveModal(false)}
+          error={
+            notice?.error ? (
+              <SourceMessage text={notice.text} values={notice.values} error />
+            ) : undefined
+          }
+        />
+      )}
+      {exitPrompt && (
+        <Dialog
+          titleId="exit-title"
+          className="exit-dialog"
+          onDismiss={returnToReview}
+        >
+          <div className="section-head">
+            <h2 id="exit-title">
+              {tr(busy ? "正在处理修改" : "还有修改没有保存")}
+            </h2>
+            <button aria-label={tr("关闭")} onClick={returnToReview}>
+              <X size={18} />
             </button>
-          </section>
-        </div>
+          </div>
+          <p>
+            {tr(
+              busy
+                ? "请等待当前操作完成，再退出。"
+                : "本次改装尚未写入存档。可以返回变更清单，确认后一起保存。",
+            )}
+          </p>
+          <div className="button-row">
+            <button disabled={!!busy} onClick={discardAndClose}>
+              {tr("不保存并退出")}
+            </button>
+            <button className="primary" onClick={returnToReview}>
+              {tr("返回变更清单")}
+            </button>
+          </div>
+        </Dialog>
       )}
       {restoreId && (
         <div className="modal-backdrop">

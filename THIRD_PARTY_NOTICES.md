@@ -31,6 +31,10 @@ https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution
 The application also uses Tauri, React, TypeScript, Vite, Lucide, and Rust crates listed in Cargo.lock. Their dependency versions are locked in the source repository. The packaging workflow generates `licenses/dependencies/DEPENDENCIES.md`, `inventory.json`, and collected license texts in every release archive.
 
 
+## Fonts
+
+The interface bundles Barlow, Barlow Condensed (Jeremy Tribby) and JetBrains Mono (JetBrains) through the `@fontsource` npm packages. All three are licensed under the SIL Open Font License 1.1; the license texts ship inside each package and are collected into the release dependency inventory.
+
 ## Locale archive path hashing
 
 The read-only game text reader uses the 2011 CityHash variant from the MIT-licensed [scs_tools cityhash module](https://github.com/Wilps93/scs_tools/blob/e147e755778579e78f80a406a53c64515113d7a1/src/cityhash.rs), pinned to commit `e147e755778579e78f80a406a53c64515113d7a1`. The scs_tools and underlying Google notices are included in `licenses/locale-cityhash-MIT.txt` and every release package. Archive metadata reading is implemented locally from documented format information.

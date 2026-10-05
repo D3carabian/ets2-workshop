@@ -1,0 +1,94 @@
+/* Day mode shares Cockpit's geometry and type, with a white workspace. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --chrome: #ffffff;
+  --rail: #f6f7f9;
+  --well: #f3f5f7;
+  --bg: #ffffff;
+  --panel: #f8f9fb;
+  --raise: #edf0f4;
+  --line: #dce1e7;
+  --line-strong: #b4beca;
+  --tx: #202a36;
+  --dim: #536172;
+  --faint: #637184;
+  --amb: #174c91;
+  --amb-ink: #ffffff;
+  --amb-soft: rgba(23, 76, 145, 0.1);
+  --amb-edge: rgba(23, 76, 145, 0.5);
+  --ok: #237b48;
+  --ok-soft: rgba(35, 123, 72, 0.09);
+  --bad: #b0442a;
+  --bad-soft: rgba(176, 68, 42, 0.08);
+  --gauge-current: #617b94;
+  --scrim: rgba(29, 40, 55, 0.32);
+}
+
+/* Keep application chrome inert while preserving normal text-field editing. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+img,
+a {
+  -webkit-user-drag: none;
+}
+
+.settings-grid {
+  align-items: stretch;
+}
+
+:root[data-theme="light"] .gauge-track {
+  stroke: #d1dae4;
+}
+:root[data-theme="light"] .bar-track {
+  background: #d1dae4;
+}
+
+.appearance-settings {
+  margin-bottom: 24px;
+}
+.appearance-settings p {
+  color: var(--dim);
+  margin: 8px 0 16px;
+}
+.theme-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.theme-options button {
+  min-width: 160px;
+  height: 42px;
+}
+.theme-options button[aria-pressed="true"] {
+  color: var(--amb);
+  background: var(--amb-soft);
+  border-color: var(--amb-edge);
+}
+:root[data-theme="light"] .inline-warning,
+:root[data-theme="light"] .wizard-error {
+  border-color: var(--amb-edge);
+}
+:root[data-theme="light"] .part-row {
+  border-bottom-color: var(--line);
+}
+:root[data-theme="light"] .truck-status {
+  background: var(--faint);
+}
+:root[data-theme="light"] .truck-status.current {
+  background: var(--amb);
+}
+:root[data-theme="light"] .changes,
+:root[data-theme="light"] .busy,
+:root[data-theme="light"] .modal,
+:root[data-theme="light"] .onboarding,
+:root[data-theme="light"] .path-entry {
+  box-shadow: 0 12px 32px -16px var(--scrim);
+}

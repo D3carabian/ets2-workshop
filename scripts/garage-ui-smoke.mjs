@@ -129,15 +129,27 @@ try {
   await page.getByLabel("搜索候选配件").fill("483");
   await page.locator(".candidate").click();
   await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
-  await page.waitForSelector(".changes .change");
-  assert.equal(await page.locator(".changes .change").count(), 1);
+  await page.locator(".status-pending.has-pending").waitFor();
+  assert.equal(await page.locator(".titlebar-save b").innerText(), "1");
+  assert.equal(await page.locator(".changes").count(), 0);
+  await page.locator(".titlebar-save").click();
+  const review = page.locator(".modal.change-review");
+  await review.locator(".changes .change").waitFor();
+  assert.equal(await review.locator(".change").count(), 1);
+  await review.getByRole("button", { name: "继续改装", exact: true }).click();
+  await review.waitFor({ state: "hidden" });
   await page.locator(".truck-card").filter({ hasText: "TEST 079" }).click();
   await page.getByLabel("配件类别", { exact: true }).selectOption("interior");
   assert.equal(
-    await page.locator(".changes .change").count(),
-    1,
+    await page.locator(".titlebar-save b").innerText(),
+    "1",
     "Changing truck/category must preserve staged edits",
   );
+  await page.locator(".titlebar-save").click();
+  await review.locator(".change").waitFor();
+  assert.equal(await review.locator(".change").count(), 1);
+  await review.getByRole("button", { name: "关闭", exact: true }).click();
+  await review.waitFor({ state: "hidden" });
   assert.equal(
     await readFile(source, "utf8"),
     original,

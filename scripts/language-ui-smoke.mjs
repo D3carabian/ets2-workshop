@@ -146,15 +146,16 @@ try {
   await page.getByLabel("搜索候选配件").fill("530");
   await page.locator(".candidate").click();
   await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
-  await page.waitForSelector(".changes .change");
+  await page.locator(".status-pending.has-pending").waitFor();
+  assert.equal(await page.locator(".changes").count(), 0);
   const callsBefore = await page.evaluate(
     () => window.__languageTestCalls.length,
   );
   await page.getByLabel("语言 / Language", { exact: true }).selectOption("en");
   await page.getByRole("button", { name: "Save changes" }).waitFor();
   assert.equal(
-    await page.locator(".changes .change").count(),
-    1,
+    await page.locator(".titlebar-save b").innerText(),
+    "1",
     "Language switch preserves staged operation",
   );
   assert.equal(
@@ -178,15 +179,19 @@ try {
       .isDisabled(),
   );
   await page.getByRole("button", { name: /^Garage/ }).click();
-  await page.getByRole("button", { name: "Save changes" }).click();
-  await page.locator(".modal input").fill("语言保留");
+  await page.locator(".titlebar-save").click();
+  const review = page.locator(".modal.change-review");
+  await review.locator(".changes .change").waitFor();
+  assert.equal(await review.locator(".change").count(), 1);
+  await review.locator("input").fill("语言保留");
   await page
     .getByLabel("语言 / Language", { exact: true })
     .selectOption("zh-CN");
-  assert.equal(await page.locator(".modal input").inputValue(), "语言保留");
-  assert.match(await page.locator(".modal").innerText(), /保存这次改装/);
+  assert.equal(await review.locator("input").inputValue(), "语言保留");
+  assert.match(await review.innerText(), /保存这次改装/);
+  assert.equal(await review.locator(".change").count(), 1);
   await page.getByLabel("语言 / Language", { exact: true }).selectOption("en");
-  await page.getByRole("button", { name: "Confirm save", exact: true }).click();
+  await review.getByRole("button", { name: /^Confirm save/ }).click();
   await page
     .locator(".notice.success")
     .filter({ hasText: "Saved as 语言保留" })

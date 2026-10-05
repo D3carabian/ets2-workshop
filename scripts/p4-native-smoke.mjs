@@ -163,12 +163,19 @@ try {
   await page.locator(".part-row").click();
   await page.getByRole("button", { name: "本机配件库", exact: true }).click();
   await page.locator(".candidate").click();
+  const pendingBeforeRejected = await page
+    .locator(".status-pending")
+    .innerText();
+  await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
+  await page
+    .locator(".notice.error")
+    .filter({ hasText: "此核心部件暂不支持替换" })
+    .waitFor();
   assert.equal(
-    await page
-      .getByRole("button", { name: "加入变更清单", exact: true })
-      .isDisabled(),
-    true,
+    await page.locator(".status-pending").innerText(),
+    pendingBeforeRejected,
   );
+  assert.equal(await page.locator(".status-pending.has-pending").count(), 0);
   assert.match(
     await page.locator(".inspector").innerText(),
     /此核心部件暂不支持替换/,
@@ -215,20 +222,10 @@ try {
         last: box(".inspector > :last-child"),
         candidates: box(".candidates"),
         language: box(".header-right .language-picker select"),
-        chip: box(".header-right .chip"),
-        backup: box(".header-backup"),
         fleetHeading: box(".fleet .section-head h2"),
         fleetCount: box(".fleet .section-head > span"),
       };
     });
-    assert(
-      Math.abs(measure.language.center - measure.chip.center) < 2,
-      "Header controls vertically align",
-    );
-    assert(
-      Math.abs(measure.language.center - measure.backup.center) < 2,
-      "Backup label aligns with language",
-    );
     assert(
       Math.abs(measure.fleetHeading.bottom - measure.fleetCount.bottom) < 5,
       "Fleet heading and count share a baseline",
@@ -288,10 +285,20 @@ try {
     "Selecting a part must not claim a backup exists",
   );
   await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
-  await page.waitForSelector(".changes .change");
+  await page.locator(".status-pending.has-pending").waitFor();
+  assert.equal(await page.locator(".changes").count(), 0);
   await page.getByLabel("语言 / Language", { exact: true }).selectOption("en");
-  assert.match(await page.locator(".changes").innerText(), /Game Engine Beta/);
-  assert.equal(await page.locator(".changes .change").count(), 1);
+  assert.equal(await page.locator(".titlebar-save b").innerText(), "1");
+  await page.locator(".titlebar-save").click();
+  const review = page.locator(".modal.change-review");
+  await review.locator(".changes .change").waitFor();
+  assert.match(
+    await review.locator(".changes").innerText(),
+    /Game Engine Beta/,
+  );
+  assert.equal(await review.locator(".change").count(), 1);
+  await review.getByRole("button", { name: "Close", exact: true }).click();
+  await review.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   assert.equal(
     await page
@@ -300,16 +307,14 @@ try {
     true,
   );
   await page.locator(".nav").filter({ hasText: "Garage" }).click();
-  await page.getByRole("button", { name: "Save changes" }).click();
-  await page.locator(".modal input").fill("P4 bilingual save");
+  await page.locator(".titlebar-save").click();
+  await review.locator(".change").waitFor();
+  await review.locator("input").fill("P4 bilingual save");
   await page
     .getByLabel("语言 / Language", { exact: true })
     .selectOption("zh-CN");
-  assert.equal(
-    await page.locator(".modal input").inputValue(),
-    "P4 bilingual save",
-  );
-  await page.getByRole("button", { name: "确认保存", exact: true }).click();
+  assert.equal(await review.locator("input").inputValue(), "P4 bilingual save");
+  await review.getByRole("button", { name: /^确认保存/ }).click();
   await page
     .locator(".notice.success")
     .filter({ hasText: "已保存为 P4 bilingual save" })

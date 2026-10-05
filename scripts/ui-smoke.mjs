@@ -45,21 +45,30 @@ try {
   await page.locator(".inspector select").selectOption("engine");
   await page.locator(".candidate").filter({ hasText: "d17a780" }).click();
   await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
-  await page.locator(".notice.error").filter({ hasText: "禁止追加" }).waitFor();
+  await page
+    .locator(".notice.error")
+    .filter({ hasText: "此类别不可追加；核心部件不能重复安装" })
+    .waitFor();
   assert.equal(await page.locator(".changes .change").count(), 0);
+  assert.equal(await page.locator(".status-pending.has-pending").count(), 0);
   await page.locator(".part-row").filter({ hasText: "发动机" }).click();
   await page.locator(".candidate").filter({ hasText: "d17a780" }).click();
   await page.getByRole("button", { name: "加入变更清单", exact: true }).click();
-  await page.waitForSelector(".changes .change");
-  assert.match(await page.locator(".changes").innerText(), /d17a780/);
+  await page.locator(".status-pending.has-pending").waitFor();
+  assert.equal(await page.locator(".titlebar-save b").innerText(), "1");
+  assert.equal(await page.locator(".changes").count(), 0);
   await mkdir("verification/screenshots", { recursive: true });
   await page.screenshot({
     path: "verification/screenshots/garage-preview.png",
     fullPage: true,
   });
-  await page.getByRole("button", { name: /保存修改/ }).click();
-  await page.locator(".modal input").fill("UI_smoke_780");
-  await page.getByRole("button", { name: "确认保存", exact: true }).click();
+  await page.locator(".titlebar-save").click();
+  const review = page.locator(".modal.change-review");
+  await review.locator(".changes .change").waitFor();
+  assert.equal(await review.locator(".change").count(), 1);
+  assert.match(await review.locator(".changes").innerText(), /d17a780/);
+  await review.locator("input").fill("UI_smoke_780");
+  await review.getByRole("button", { name: /^确认保存/ }).click();
   await page
     .locator(".notice.success")
     .filter({ hasText: "已保存为 UI_smoke_780" })
@@ -67,13 +76,13 @@ try {
   await page.locator(".nav").filter({ hasText: "备份与恢复" }).click();
   await page.locator(".history-verification summary").first().click();
   const resultPath = await page
-    .locator("select option")
+    .locator(".history-verification select option")
     .evaluateAll(
       (options) =>
         options.find((o) => o.textContent.includes("UI_smoke_780"))?.value,
     );
   assert(resultPath);
-  await page.locator("select").selectOption(resultPath);
+  await page.locator(".history-verification select").selectOption(resultPath);
   await page
     .getByRole("button", { name: "检查所选存档", exact: true })
     .first()
@@ -102,7 +111,7 @@ try {
     status: "passed",
     tested: [
       "actual desktop launch",
-      "isolated encrypted save decrypt",
+      "isolated synthetic save open",
       "five owned trucks",
       "full accessory list",
       "duplicate engine rejected in UI",

@@ -280,6 +280,7 @@ try {
     await page.locator(".stage-button").click();
     await page.locator(".notice.error").waitFor();
     assert.equal(await page.locator(".changes").count(), 0);
+    assert.equal(await page.locator(".status-pending.has-pending").count(), 0);
     await page.locator(".candidate").click();
     assert.equal(await page.locator(".candidate-metrics").count(), 0);
     assert.equal(await page.locator(".notice.error").count(), 0);
@@ -411,28 +412,42 @@ try {
         })
         .click();
       await page.locator(".stage-button").click();
-      await page.locator(".changes .change").waitFor();
+      await idle();
+      await page.locator(".status-pending.has-pending").waitFor();
+      assert.equal(await page.locator(".titlebar-save b").innerText(), "1");
+      assert.equal(await page.locator(".changes").count(), 0);
     }
     await stagePart(1);
     assert.match(
       await page.locator(".truck-card.selected").innerText(),
       /Synthetic Driver 0420/,
     );
-    await page.locator(".change button").click();
-    await page.locator(".changes").waitFor({ state: "hidden" });
+    await page.locator(".titlebar-save").click();
+    const review = page.locator(".modal.change-review");
+    await review.locator(".changes .change").waitFor();
+    await review
+      .getByRole("button", { name: "移除此修改", exact: true })
+      .click();
+    await review.locator(".change").waitFor({ state: "hidden" });
+    assert(
+      await review.getByRole("button", { name: /^确认保存/ }).isDisabled(),
+    );
+    await review.getByRole("button", { name: "继续改装", exact: true }).click();
+    await review.waitFor({ state: "hidden" });
     assert.match(
       await page.locator(".truck-card.selected").innerText(),
       /Synthetic Driver 0420/,
     );
     await stagePart(1);
     report.checks.push("driver remains after preview and undo");
-    await page.getByRole("button", { name: /保存修改/ }).click();
-    const firstName = await page.locator(".modal input").inputValue();
+    await page.locator(".titlebar-save").click();
+    await review.locator(".changes .change").waitFor();
+    const firstName = await review.locator("input").inputValue();
     assert.match(
       firstName,
       /^Workshop_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}$/,
     );
-    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    await review.getByRole("button", { name: /^确认保存/ }).click();
     await idle();
     await page.locator(".backup-status").waitFor();
     assert.equal(
@@ -440,28 +455,31 @@ try {
       sources.get(5000).text,
     );
     await stagePart(2);
-    await page.getByRole("button", { name: /保存修改/ }).click();
-    const secondName = await page.locator(".modal input").inputValue();
+    await page.locator(".titlebar-save").click();
+    await review.locator(".changes .change").waitFor();
+    const secondName = await review.locator("input").inputValue();
     assert.notEqual(firstName, secondName);
     const manualName = "Synthetic manual retry";
-    await page.locator(".modal input").fill(manualName);
-    await page.locator(".modal select").selectOption("overwrite");
-    await page.locator(".modal select").selectOption("new");
-    assert.equal(await page.locator(".modal input").inputValue(), manualName);
+    await review.locator("input").fill(manualName);
+    await review.locator("select").selectOption("overwrite");
+    await review.locator("select").selectOption("new");
+    assert.equal(await review.locator("input").inputValue(), manualName);
     const [receipt] = await rpc("history");
     assert(receipt.output.startsWith(root + sep));
     const savedText = await readFile(receipt.output, "utf8");
     await writeFile(receipt.output, savedText + "\n");
     try {
-      await page.getByRole("button", { name: "确认保存", exact: true }).click();
+      await review.getByRole("button", { name: /^确认保存/ }).click();
       await idle();
-      await page.locator(".notice.error").waitFor();
+      await review.locator(".review-error[role='alert']").waitFor();
+      assert.equal(await review.locator(".change").count(), 1);
+      assert.equal(await review.locator("input").inputValue(), manualName);
     } finally {
       await writeFile(receipt.output, savedText);
     }
-    await page.getByRole("button", { name: /保存修改/ }).click();
-    assert.equal(await page.locator(".modal input").inputValue(), manualName);
-    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    assert(await review.isVisible(), "Save failure keeps the review open");
+    assert.equal(await review.locator("input").inputValue(), manualName);
+    await review.getByRole("button", { name: /^确认保存/ }).click();
     await idle();
     await page
       .locator(".notice.success")

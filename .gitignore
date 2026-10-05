@@ -27,3 +27,5 @@ Thumbs.db
 /private/
 settings.json
 catalog.json
+catalog-*.json
+parts-build-cache-*.json
